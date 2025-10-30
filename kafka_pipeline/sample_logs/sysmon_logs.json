@@ -1,0 +1,29 @@
+[
+  {
+    "EventID": 1,
+    "UtcTime": "2023-10-31 00:00:00.000",
+    "ProcessGuid": "{55012345-1234-5678-9abc-def012345678}",
+    "ProcessId": 1234,
+    "Image": "C:\\Windows\\System32\\cmd.exe",
+    "CommandLine": "cmd.exe /c echo hello",
+    "User": "USER",
+    "Hashes": "SHA256=abc123..."
+  },
+  {
+    "EventID": 3,
+    "UtcTime": "2023-10-31 00:01:00.000",
+    "ProcessGuid": "{55012345-1234-5678-9abc-def012345679}",
+    "ProcessId": 1235,
+    "Image": "C:\\Windows\\System32\\notepad.exe",
+    "User": "USER"
+  },
+  {
+    "EventID": 11,
+    "UtcTime": "2023-10-31 00:02:00.000",
+    "ProcessGuid": "{55012345-1234-5678-9abc-def012345680}",
+    "ProcessId": 1236,
+    "Image": "C:\\Windows\\System32\\powershell.exe",
+    "CommandLine": "powershell -nop -exec bypass",
+    "User": "SYSTEM"
+  }
+]
