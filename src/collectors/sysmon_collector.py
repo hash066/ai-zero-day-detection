@@ -1,0 +1,1 @@
+# Parses Sysmon logs and streams to Kafka
