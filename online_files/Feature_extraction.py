@@ -2,18 +2,58 @@ import dpkt
 import pandas as pd
 import json
 from scapy.all import *
-from Communication_features import Communication_wifi, Communication_zigbee
-from Connectivity_features import Connectivity_features_basic, Connectivity_features_time, \
+from .Communication_features import Communication_wifi, Communication_zigbee
+from .Connectivity_features import Connectivity_features_basic, Connectivity_features_time, \
     Connectivity_features_flags_bytes
-from Dynamic_features import Dynamic_features
-from Layered_features import L3, L4, L2, L1
-from Supporting_functions import get_protocol_name, get_flow_info, get_flag_values, compare_flow_flags, \
+from .Dynamic_features import Dynamic_features
+from .Layered_features import L3, L4, L2, L1
+from .Supporting_functions import get_protocol_name, get_flow_info, get_flag_values, compare_flow_flags, \
     get_src_dst_packets, calculate_incoming_connections, \
     calculate_packets_counts_per_ips_proto, calculate_packets_count_per_ports_proto
-    
+
 from tqdm import tqdm
 import time
-import datetime 
+import datetime
+
+def extract_features(log):
+    # Feature extraction logic for Sysmon events
+    event_id = log.get("EventID")
+    message = log.get("Message", [])
+
+    features = {"EventID": event_id}
+
+    if event_id == 1:  # Process Create
+        # StringInserts indices: 0:UtcTime,1:ProcessGuid,2:ProcessId,3:Image,4:FileVersion,5:Description,6:Product,7:Company,8:OriginalFileName,9:CommandLine,10:CurrentDirectory,11:User,12:LogonGuid,13:LogonId,14:TerminalSessionId,15:IntegrityLevel,16:Hashes,17:ParentProcessGuid,18:ParentProcessId,19:ParentImage,20:ParentCommandLine,21:ParentUser
+        features["Image"] = message[3] if len(message) > 3 else ""
+        features["CommandLine"] = message[9] if len(message) > 9 else ""
+        features["User"] = message[11] if len(message) > 11 else ""
+        features["Hashes"] = message[16] if len(message) > 16 else ""
+        features["ParentImage"] = message[19] if len(message) > 19 else ""
+        features["ParentCommandLine"] = message[20] if len(message) > 20 else ""
+
+    elif event_id == 3:  # Network Connection
+        # StringInserts: 0:UtcTime,1:ProcessGuid,2:ProcessId,3:Image,4:User,5:SrcAddr,6:SrcPort,7:DstAddr,8:DstPort,9:Size,10:SrcIsIpv6,11:DstIsIpv6,12:Initiated,13:SrcHostName,14:DstHostName
+        features["SrcAddr"] = message[5] if len(message) > 5 else ""
+        features["DstAddr"] = message[7] if len(message) > 7 else ""
+        features["SrcPort"] = int(message[6]) if len(message) > 6 and message[6] else 0
+        features["DstPort"] = int(message[8]) if len(message) > 8 and message[8] else 0
+        features["Size"] = int(message[9]) if len(message) > 9 and message[9] else 0
+        features["SrcIsIpv6"] = message[10] if len(message) > 10 else ""
+        features["DstIsIpv6"] = message[11] if len(message) > 11 else ""
+        features["Initiated"] = message[12] if len(message) > 12 else ""
+
+    elif event_id == 11:  # File Create
+        # StringInserts: 0:UtcTime,1:ProcessGuid,2:ProcessId,3:Image,4:TargetFilename,5:CreationUtcTime,6:User
+        features["TargetFilename"] = message[4] if len(message) > 4 else ""
+
+    # Add more EventIDs as needed, e.g., EventID 2: Process Terminate, EventID 5: Process Terminate, etc.
+
+    # Common features, if TimeGenerated is present
+    if "TimeGenerated" in log:
+        # Could convert to unix timestamp, but for now keep as string
+        features["TimeGenerated"] = log["TimeGenerated"]
+
+    return features
 
 class Feature_extraction():
     columns = ["ts","Header_Length","Protocol Type","Time_To_Live","Rate", 
