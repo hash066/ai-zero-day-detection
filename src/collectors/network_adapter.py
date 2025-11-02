@@ -6,7 +6,7 @@ online_files research (Layered_features, Connectivity_features, Supporting_funct
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from datetime import datetime
 
 from ..preprocessing.network_features import NetworkFeatureRecord
@@ -209,7 +209,7 @@ class BatchNetworkAdapter:
         record = self.adapter.adapt_packet(tshark_packet)
         
         if record:
-            flow_id = record.flow_id
+            flow_id = str(record.flow_id)
             
             # Initialize flow if new
             if flow_id not in self.flows:
@@ -253,7 +253,7 @@ class BatchNetworkAdapter:
         self.flow_last_seen.clear()
 
 
-def create_adapter(batch_mode: bool = False, **kwargs) -> NetworkAdapter:
+def create_adapter(batch_mode: bool = False, **kwargs) -> Union[NetworkAdapter, "BatchNetworkAdapter"]:
     """
     Factory function to create appropriate adapter.
     

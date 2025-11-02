@@ -70,38 +70,38 @@ def get_flow_info(flows: Dict[Tuple, List[Dict]], flow: Tuple) -> Tuple[int, flo
                   average_duration, std_duration, idle_time, active_time)
     """
     if flow not in flows or not flows[flow]:
-        return (0, 0, 0, 0, 0, 0, 0, 0, 0)
+        return (0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     
     packets = flows[flow]
     
     # Total bytes
-    total_bytes = sum(pkt.get('byte_count', 0) for pkt in packets)
+    total_bytes = sum(int(pkt.get('byte_count', 0)) for pkt in packets)
     
-    # Extract timestamps
-    timestamps = sorted([pkt.get('ts', 0) for pkt in packets])
+    # Extract timestamps as floats
+    timestamps = sorted([float(pkt.get('ts', 0)) for pkt in packets])
     
     if not timestamps:
-        return (total_bytes, 0, 0, 0, 0, 0, 0, 0, 0)
+        return (int(total_bytes), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     
     # Calculate idle time (time since last packet)
     if len(timestamps) > 1:
-        idle_time = timestamps[-1] - timestamps[-2]
+        idle_time = float(timestamps[-1] - timestamps[-2])
     else:
-        idle_time = timestamps[-1] if timestamps else 0
+        idle_time = float(timestamps[-1]) if timestamps else 0.0
     
-    # Duration statistics
-    max_duration = max(timestamps)
-    min_duration = min(timestamps)
-    sum_duration = sum(timestamps)
-    average_duration = np.mean(timestamps) if timestamps else 0
-    std_duration = np.std(timestamps) if len(timestamps) > 1 else 0
+    # Duration statistics (explicitly cast to Python float)
+    max_duration = float(max(timestamps))
+    min_duration = float(min(timestamps))
+    sum_duration = float(sum(timestamps))
+    average_duration = float(np.mean(timestamps)) if timestamps else 0.0
+    std_duration = float(np.std(timestamps)) if len(timestamps) > 1 else 0.0
     
     # Flow duration (first to last packet)
-    duration = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 0
+    duration = float(timestamps[-1] - timestamps[0]) if len(timestamps) > 1 else 0.0
     active_time = duration
     
     return (
-        total_bytes,
+        int(total_bytes),
         duration,
         max_duration,
         min_duration,

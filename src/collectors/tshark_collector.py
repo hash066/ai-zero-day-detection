@@ -132,7 +132,7 @@ class TsharkCollector:
                 cmd += f' -Y "{self.display_filter}"'
         else:
             # Live mode: capture from interface, use EK format for line-by-line JSON
-            cmd = f'{self.tshark_path} -i {shlex.quote(self.interface)} -l -T ek'
+            cmd = f'{self.tshark_path} -i {shlex.quote(str(self.interface))} -l -T ek'
             if self.capture_filter:
                 cmd += f' -f "{self.capture_filter}"'
             if self.display_filter:
@@ -207,9 +207,20 @@ class TsharkCollector:
         if not frame_time:
             frame_time = get_field("frame", "frame.time_epoch")
         
-        if frame_time:
+        # Normalize list-like values to a single scalar element
+        if isinstance(frame_time, list) and frame_time:
+            frame_time = frame_time[0]
+        
+        if frame_time is not None:
             try:
-                ts = float(frame_time)
+                # Accept numeric types and numeric strings, coerce to float
+                if isinstance(frame_time, (int, float)):
+                    ts = float(frame_time)
+                elif isinstance(frame_time, str):
+                    ts = float(frame_time)
+                else:
+                    # Fallback: try to coerce via string representation
+                    ts = float(str(frame_time))
                 # If timestamp is in milliseconds (> 10 billion), convert to seconds
                 if ts > 10_000_000_000:
                     ts = ts / 1000.0
