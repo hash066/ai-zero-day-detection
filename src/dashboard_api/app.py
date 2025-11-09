@@ -7,6 +7,7 @@ such as recent alerts and device risk scores.
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from .routes import alerts
 
 # --- FastAPI App Initialization ---
@@ -14,6 +15,16 @@ app = FastAPI(
     title="Zero-Day Threat Detector API",
     description="API for visualizing security alerts and threat intelligence.",
     version="1.0.0",
+)
+
+# --- CORS Middleware ---
+# Allow frontend to connect to API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"],  # React/Vite dev servers
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # --- Include API Routers ---

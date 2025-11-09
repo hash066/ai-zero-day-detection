@@ -18,6 +18,7 @@ Our system provides a comprehensive, multi-layered defense strategy that monitor
 - **Graph-Based Threat Hunting:** A **Graph Neural Network (GNN)** models the network as a dynamic graph of interconnected devices. This allows the system to identify unusual lateral movements, suspicious connections, and other complex attack patterns that are invisible to endpoint-only analysis.
 - **Automated Threat Scoring:** An intelligent **Ensemble Scorer** combines the outputs of the LSTM and GNN models into a single, actionable threat score, prioritizing the most critical events for security teams.
 - **AI-Powered Response Engine:** When a high-threat event is detected, the system automatically triggers a response, such as sending detailed alerts to security teams via webhooks (e.g., to Slack) and logging the event for further analysis and model retraining.
+- **Full-Stack Dashboard:** A modern **React/TypeScript frontend** with real-time threat visualization, interactive charts, and comprehensive monitoring capabilities.
 - **Visualization-Ready API:** A built-in **FastAPI backend** serves the processed threat intelligence data, making it easy to connect a frontend dashboard (e.g., React, Kibana) for visualizing alerts, device risk levels, and attack timelines.
 
 ---
@@ -84,6 +85,54 @@ For a deeper dive into the architecture, please see the [**`docs/ARCHITECTURE.md
 
 3.  **Run the Inference and Dashboard API:**
     - Once the models are trained, you can start the real-time inference pipeline and the dashboard API. See the [**`API_GUIDE.md`**](docs/API_GUIDE.md) for instructions.
+
+### Full Stack Deployment with Docker
+
+For a complete development environment with both backend and frontend:
+
+1.  **Start all services:**
+    ```bash
+    docker-compose up --build
+    ```
+
+2.  **Access the applications:**
+    - **Frontend Dashboard:** http://localhost:3000
+    - **Backend API:** http://localhost:8000
+    - **API Documentation:** http://localhost:8000/docs
+
+3.  **Stop the services:**
+    ```bash
+    docker-compose down
+    ```
+
+### Development Setup
+
+For local development without Docker:
+
+1.  **Backend Setup:**
+    ```bash
+    # Install Python dependencies
+    pip install -r requirements.txt
+
+    # Start MongoDB (if not using Docker)
+    mongod
+
+    # Start the API server
+    cd src/dashboard_api
+    uvicorn app:app --reload --host 0.0.0.0 --port 8000
+    ```
+
+2.  **Frontend Setup:**
+    ```bash
+    # Install Node.js dependencies
+    cd aegis-zero
+    npm install
+
+    # Start the development server
+    npm run dev
+    ```
+
+The frontend will be available at http://localhost:5173 (Vite dev server) and will proxy API requests to http://localhost:8000.
 
 ---
 

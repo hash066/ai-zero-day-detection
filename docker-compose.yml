@@ -72,6 +72,21 @@ services:
       - zero-day-network
     command: ["uvicorn", "src.dashboard_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
+  # Frontend React Dashboard
+  frontend:
+    build:
+      context: ./aegis-zero
+      dockerfile: ../Dockerfile.frontend
+    container_name: zero-day-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - api
+    networks:
+      - zero-day-network
+
 volumes:
   mongodb_data:
 
