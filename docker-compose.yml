@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  # Main AI Zero-Day Detection Pipeline
+  zero-day-detector:
+    build: .
+    container_name: zero-day-detector
+    volumes:
+      - ./data:/app/data
+      - ./trained_models:/app/trained_models
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - CONFIG_PATH=/app/config.yaml
+    depends_on:
+      - kafka
+      - mongodb
+    networks:
+      - zero-day-network
+    command: ["python", "main_pipeline.py", "--config", "config.yaml", "--full-pipeline"]
+
+  # Kafka for streaming data
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: zero-day-kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+    networks:
+      - zero-day-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zero-day-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - zero-day-network
+
+  # MongoDB for API data storage
+  mongodb:
+    image: mongo:6.0
+    container_name: zero-day-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - zero-day-network
+
+  # API/Dashboard service
+  api:
+    build: .
+    container_name: zero-day-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+    depends_on:
+      - mongodb
+    networks:
+      - zero-day-network
+    command: ["uvicorn", "src.dashboard_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+volumes:
+  mongodb_data:
+
+networks:
+  zero-day-network:
+    driver: bridge

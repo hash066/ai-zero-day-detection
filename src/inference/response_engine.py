@@ -153,8 +153,8 @@ class EnhancedResponseEngine:
     def process_detection(
         self,
         detection_result: Dict[str, Any],
-        entity_id: str,
-        entity_type: str = 'unknown',
+        entity_id: str = 'system',
+        entity_type: str = 'system',
         source_data: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """

@@ -1,0 +1,44 @@
+# AI Zero-Day Detection System Configuration
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  features_dir: "data/features"
+  graphs_dir: "data/graphs"
+  models_dir: "trained_models"
+
+collection:
+  sysmon_batch_size: 1000
+  network_interface: null  # Set to interface name for live capture
+  pcap_file: null  # Set to PCAP file path for offline processing
+
+preprocessing:
+  window_minutes: 5
+  time_tolerance: 5  # seconds for data fusion
+
+models:
+  lstm_model_dir: "trained_models/lstm"
+  gnn_model_dir: "trained_models/gnn"
+  ensemble_lstm_weight: 0.6
+  ensemble_gnn_weight: 0.4
+
+inference:
+  alert_threshold: 0.75
+  webhook_url: ""  # Set to Slack webhook URL for alerts
+
+# Example production configuration:
+# data:
+#   raw_dir: "/data/raw"
+#   processed_dir: "/data/processed"
+#   features_dir: "/data/features"
+#   graphs_dir: "/data/graphs"
+#   models_dir: "/models"
+#
+# collection:
+#   sysmon_batch_size: 5000
+#   network_interface: "eth0"
+#   pcap_file: null
+#
+# inference:
+#   alert_threshold: 0.8
+#   webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"

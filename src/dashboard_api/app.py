@@ -80,4 +80,3 @@ async def add_dummy_data_on_startup():
         
         alerts_collection.insert_many(alerts_to_insert)
         print("INFO:     Added dummy alert data to the database.")
-
