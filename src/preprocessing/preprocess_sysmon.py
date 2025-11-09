@@ -63,14 +63,26 @@ def preprocess_sysmon_logs(input_path: str, output_path: str):
     
     logging.info("Parsing Sysmon event details...")
     # Apply the parsing function to each row's detail string
-    parsed_details_list = df[details_column].dropna().apply(parse_sysmon_details)
+    parsed_details_list = df[details_column].apply(parse_sysmon_details)
     
     # Convert the list of dictionaries into a DataFrame
-    details_df = pd.DataFrame(parsed_details_list.tolist())
+    details_df = pd.DataFrame(parsed_details_list.tolist(), index=df.index)
     
     # Combine the initial columns (like Level, Event ID) with the new parsed columns
     # Drop the original details column as it's now redundant
-    processed_df = pd.concat([df.drop(columns=[details_column]), details_df], axis=1)
+    base_df = df.drop(columns=[details_column])
+    
+    # Handle duplicate column names by adding suffixes
+    duplicate_cols = set(base_df.columns).intersection(set(details_df.columns))
+    if duplicate_cols:
+        logging.warning(f"Found duplicate columns: {duplicate_cols}. Adding suffixes.")
+        details_df = details_df.rename(columns={col: f"{col}_parsed" for col in duplicate_cols})
+    
+    # Reset index to avoid issues
+    base_df = base_df.reset_index(drop=True)
+    details_df = details_df.reset_index(drop=True)
+    
+    processed_df = pd.concat([base_df, details_df], axis=1)
     
     # --- Data Cleaning and Standardization ---
     # Rename columns to match expected formats for feature engineering
