@@ -1,153 +1,82 @@
 # Aegis Zero Dashboard# React + TypeScript + Vite
 
-
-
 A professional, minimalistic React + Vite dashboard for the AI-Based Zero-Day Attack Detection System.This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Features
 
-
-## FeaturesCurrently, two official plugins are available:
-
-
-
-- **Real-time Monitoring**: Live threat detection and system metrics- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-
-- **Threat Management**: View and manage security alerts- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
+- **Real-time Monitoring**: Live threat detection and system metrics
+- **Threat Management**: View and manage security alerts
 - **Device Monitoring**: Track all network devices and their security status
-
 - **Network Analysis**: Monitor network traffic and flows## React Compiler
-
 - **AI Model Management**: Track ML model performance and retrain models
+- **Responsive Design**: Works seamlessly on desktop and mobile devices
 
-- **Responsive Design**: Works seamlessly on desktop and mobile devicesThe React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+## Tech Stack
 
-
-
-## Tech StackNote: This will impact Vite dev & build performances.
-
-
-
-- **React 19** - UI framework## Expanding the ESLint configuration
-
+- **React 19** - UI framework
 - **TypeScript** - Type safety
-
-- **Vite** - Build tool and dev serverIf you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
+- **Vite** - Build tool and dev server
 - **Tailwind CSS** - Styling
+- **Framer Motion** - Animations
+- **Recharts** - Data
+- **Lucide React** - Icon library
+- **date-fns** - Date formatting
 
-- **Framer Motion** - Animations```js
-
-- **Recharts** - Data visualizationexport default defineConfig([
-
-- **Lucide React** - Icon library  globalIgnores(['dist']),
-
-- **date-fns** - Date formatting  {
-
-    files: ['**/*.{ts,tsx}'],
-
-## Getting Started    extends: [
-
-      // Other configs...
+## Getting Started
 
 ### Prerequisites
 
-      // Remove tseslint.configs.recommended and replace with this
+- Node.js 18+ and npm
 
-- Node.js 18+ and npm      tseslint.configs.recommendedTypeChecked,
+### Installation
 
-      // Alternatively, use this for stricter rules
-
-### Installation      tseslint.configs.strictTypeChecked,
-
-      // Optionally, add this for stylistic rules
-
-1. Install dependencies:      tseslint.configs.stylisticTypeChecked,
+1. Install dependencies:
 
    ```bash
+   npm install
+   ```
 
-   npm install      // Other configs...
+2. Copy environment variables:
 
-   ```    ],
+   ```bash
+   cp .env.example .env
+   ```
 
-    languageOptions: {
+3. Configure your API endpoint in `.env`
 
-2. Copy environment variables:      parserOptions: {
-
-   ```bash        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-
-   cp .env.example .env        tsconfigRootDir: import.meta.dirname,
-
-   ```      },
-
-      // other options...
-
-3. Configure your API endpoint in `.env`:    },
-
-   ```env  },
-
-   VITE_API_URL=http://localhost:8000/api])
-
+   ```env
+   VITE_API_URL=http://localhost:8000/api
    ``````
 
+### Development
 
+Start the development server:
 
-### DevelopmentYou can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+```bash
+npm run dev
+```
 
+The dashboard will be available at `http://localhost:5173`
 
+### Build for Production
 
-Start the development server:```js
-
-// eslint.config.js
-
-```bashimport reactX from 'eslint-plugin-react-x'
-
-npm run devimport reactDom from 'eslint-plugin-react-dom'
+```bash
+npm run build
 
 ```
 
-export default defineConfig([
+The build output will be in the `dist/` directory.
 
-The dashboard will be available at `http://localhost:5173`  globalIgnores(['dist']),
+### Preview Production Build
 
-  {
+```bash
+npm run preview
+```
 
-### Build for Production    files: ['**/*.{ts,tsx}'],
+## Project Structure
 
-    extends: [
-
-```bash      // Other configs...
-
-npm run build      // Enable lint rules for React
-
-```      reactX.configs['recommended-typescript'],
-
-      // Enable lint rules for React DOM
-
-The build output will be in the `dist/` directory.      reactDom.configs.recommended,
-
-    ],
-
-### Preview Production Build    languageOptions: {
-
-      parserOptions: {
-
-```bash        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-
-npm run preview        tsconfigRootDir: import.meta.dirname,
-
-```      },
-
-      // other options...
-
-## Project Structure    },
-
-  },
-
-```])
-
-src/```
-
+```
+src/
 ├── components/          # Reusable UI components
 │   ├── Layout.tsx      # Main layout with sidebar
 │   ├── StatCard.tsx    # Statistics card component
