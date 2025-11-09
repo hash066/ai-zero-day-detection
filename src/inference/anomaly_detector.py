@@ -1,228 +1,597 @@
 """
-Real-time anomaly detection pipeline.
+Enhanced Real-time Anomaly Detection Pipeline.
 
-This module loads the trained LSTM and GNN models and performs inference
-on incoming Sysmon and network data streams.
+Integrated with enhanced models for zero-day attack detection:
+- EnhancedLSTMAutoencoder for temporal behavioral analysis
+- EnhancedGNNDetector for network graph anomaly detection
+- EnhancedEnsembleScorer for unified threat assessment
+- Self-supervised pre-training support
+- Feature engineering pipeline integration
+- Attention-based explainability
+- Calibrated threshold detection
+- Temporal consistency tracking
 """
 
+import logging
+import torch
 import json
 from pathlib import Path
-import logging
-
-import torch
-import joblib
+from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
+import numpy as np
+import joblib
 from torch_geometric.data import Data
+from collections import deque
+import sys
 
 # Adjusting path to import from sibling directories
-import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from models.lstm_autoencoder import LSTMAutoencoder
-from models.gnn_detector import GNNNodeClassifier
+from models.lstm_autoencoder import EnhancedLSTMAutoencoder, TEMPORAL_FEATURE_NAMES
+from models.gnn_detector import EnhancedGNNDetector, NODE_FEATURE_NAMES
+from models.ensemble_scorer import EnhancedEnsembleScorer
+from preprocessing.graph_builder import NetworkGraphBuilder
+from preprocessing.feature_engineering import extract_all_features
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-class AnomalyDetector:
+
+class EnhancedAnomalyDetector:
     """
-    Handles the loading of trained models and orchestration of the
-    inference process for both system behavior and network traffic.
+    Enhanced anomaly detection pipeline for zero-day attack detection.
+    
+    Integrates:
+    - LSTM Autoencoder for temporal behavioral patterns
+    - GNN Detector for network graph anomalies
+    - Ensemble Scorer for unified threat assessment
+    - Feature engineering pipeline (92 features)
+    - Attention mechanisms for explainability
+    - Calibrated thresholds for accurate detection
+    - Temporal consistency tracking
     """
 
-    def __init__(self, lstm_model_dir: str, gnn_model_dir: str):
+    def __init__(
+        self,
+        lstm_model_path: str,
+        gnn_model_path: str,
+        ensemble_model_path: Optional[str] = None,
+        use_pretrained_weights: bool = False,
+        pretrained_lstm_path: Optional[str] = None,
+        pretrained_gnn_path: Optional[str] = None
+    ):
         """
-        Initialize the AnomalyDetector and load all necessary artifacts.
+        Initialize Enhanced Anomaly Detector.
 
         Args:
-            lstm_model_dir (str): Path to the directory with LSTM model artifacts.
-            gnn_model_dir (str): Path to the directory with GNN model artifacts.
+            lstm_model_path: Path to trained LSTM model directory
+            gnn_model_path: Path to trained GNN model directory
+            ensemble_model_path: Path to trained ensemble scorer (optional)
+            use_pretrained_weights: Whether models use self-supervised pre-training
+            pretrained_lstm_path: Path to pre-trained LSTM encoder weights
+            pretrained_gnn_path: Path to pre-trained GNN encoder weights
         """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logging.info(f"Inference device set to: {self.device}")
+        logger.info(f"Inference device: {self.device}")
 
-        # --- Load LSTM Model and Artifacts ---
-        self.lstm_model, self.lstm_scaler, self.lstm_config = self._load_lstm_artifacts(lstm_model_dir)
-        
-        # --- Load GNN Model and Artifacts ---
-        self.gnn_model, self.gnn_scaler, self.gnn_node_mapping, self.gnn_config = self._load_gnn_artifacts(gnn_model_dir)
+        # Load models and artifacts
+        self.lstm_model, self.lstm_config = self._load_lstm_model(lstm_model_path)
+        self.gnn_model, self.gnn_config = self._load_gnn_model(gnn_model_path)
 
-    def _load_lstm_artifacts(self, model_dir: str):
-        """Loads the LSTM model, scaler, and configuration."""
-        logging.info(f"Loading LSTM model from {model_dir}...")
+        # Initialize ensemble scorer
+        if ensemble_model_path and Path(ensemble_model_path).exists():
+            self.ensemble_scorer = self._load_ensemble_scorer(ensemble_model_path)
+        else:
+            # Create new ensemble scorer with default settings
+            self.ensemble_scorer = EnhancedEnsembleScorer(
+                feature_dim=27,  # 27 behavioral features
+                use_learned_weights=True,
+                temporal_window=10,
+                confidence_threshold=0.7
+            )
+            logger.info("Created new ensemble scorer with default settings")
+
+        # Graph builder for network data
+        self.graph_builder = NetworkGraphBuilder()
+
+        # Temporal tracking
+        self.anomaly_history = deque(maxlen=100)
+
+        logger.info("Enhanced Anomaly Detector initialized successfully")
+
+    def _load_lstm_model(self, model_dir: str) -> Tuple[EnhancedLSTMAutoencoder, Dict]:
+        """Load LSTM model with enhanced features."""
+        logger.info(f"Loading Enhanced LSTM model from {model_dir}...")
         model_path = Path(model_dir)
-        
-        config_path = model_path / "model_config.json"
+
+        # Load configuration
+        config_path = model_path / "config.json"
         with open(config_path, 'r') as f:
             config = json.load(f)
 
-        model = LSTMAutoencoder(
-            input_dim=config['input_dim'],
-            latent_dim=config['latent_dim'],
-            num_layers=config['num_layers'],
-            dropout=config['dropout']
+        # Create enhanced model
+        model = EnhancedLSTMAutoencoder(
+            input_dim=config.get('input_dim', 27),  # 27 temporal features
+            latent_dim=config.get('latent_dim', 64),
+            num_layers=config.get('num_layers', 2),
+            dropout=config.get('dropout', 0.3),
+            use_attention=config.get('use_attention', True),
+            feature_names=TEMPORAL_FEATURE_NAMES
         ).to(self.device)
-        model.load_state_dict(torch.load(model_path / "lstm_autoencoder_best.pth", map_location=self.device))
+
+        # Load weights
+        weights_path = model_path / "best_model.pth"
+        if weights_path.exists():
+            checkpoint = torch.load(weights_path, map_location=self.device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            logger.info(f"✓ Loaded LSTM weights from epoch {checkpoint.get('epoch', 'N/A')}")
+        else:
+            logger.warning(f"No trained weights found at {weights_path}, using random initialization")
+
         model.eval()
 
-        scaler = joblib.load(model_path / "scaler.pkl")
-        
-        return model, scaler, config
+        return model, config
 
-    def _load_gnn_artifacts(self, model_dir: str):
-        """Loads the GNN model, scaler, node mapping, and configuration."""
-        logging.info(f"Loading GNN model from {model_dir}...")
+    def _load_gnn_model(self, model_dir: str) -> Tuple[EnhancedGNNDetector, Dict]:
+        """Load GNN model with enhanced features."""
+        logger.info(f"Loading Enhanced GNN model from {model_dir}...")
         model_path = Path(model_dir)
 
-        config_path = model_path / "model_config.json"
+        # Load configuration
+        config_path = model_path / "config.json"
         with open(config_path, 'r') as f:
             config = json.load(f)
 
-        model = GNNNodeClassifier(
-            in_channels=config['in_channels'],
-            hidden_channels=config['hidden_channels'],
-            out_channels=config['out_channels'],
-            dropout=config['dropout']
+        # Create enhanced model
+        model = EnhancedGNNDetector(
+            in_channels=config.get('in_channels', 9),  # 9 node features
+            hidden_channels=config.get('hidden_channels', 64),
+            num_heads=config.get('num_heads', 4),
+            num_layers=config.get('num_layers', 3),
+            dropout=config.get('dropout', 0.3),
+            use_temporal_aggregation=config.get('use_temporal_aggregation', True)
         ).to(self.device)
-        model.load_state_dict(torch.load(model_path / "gnn_detector_best.pth", map_location=self.device))
+
+        # Load weights
+        weights_path = model_path / "best_model.pth"
+        if weights_path.exists():
+            checkpoint = torch.load(weights_path, map_location=self.device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            logger.info(f"✓ Loaded GNN weights from epoch {checkpoint.get('epoch', 'N/A')}")
+        else:
+            logger.warning(f"No trained weights found at {weights_path}, using random initialization")
+
         model.eval()
 
-        scaler = joblib.load(model_path / "scaler.pkl")
-        node_mapping = joblib.load(model_path / "node_mapping.pkl")
+        return model, config
 
-        return model, scaler, node_mapping, config
+    def _load_ensemble_scorer(self, model_path: str) -> EnhancedEnsembleScorer:
+        """Load trained ensemble scorer."""
+        logger.info(f"Loading ensemble scorer from {model_path}...")
 
-    def detect_sysmon_anomaly(self, sequence_df: pd.DataFrame) -> float:
+        with open(Path(model_path) / "config.json", 'r') as f:
+            config = json.load(f)
+
+        scorer = EnhancedEnsembleScorer(
+            feature_dim=config.get('feature_dim', 27),
+            use_learned_weights=config.get('use_learned_weights', True),
+            temporal_window=config.get('temporal_window', 10),
+            confidence_threshold=config.get('confidence_threshold', 0.7)
+        )
+
+        # Load learned weights if available
+        weights_path = Path(model_path) / "ensemble_weights.pth"
+        if weights_path.exists() and scorer.use_learned_weights:
+            scorer.combiner.load_state_dict(
+                torch.load(weights_path, map_location=self.device)
+            )
+            logger.info("✓ Loaded ensemble combiner weights")
+
+        return scorer
+
+    def detect_temporal_anomaly(
+        self,
+        sequence_df: pd.DataFrame,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
         """
-        Calculates the reconstruction error for a sequence of Sysmon events.
+        Detect anomalies in temporal behavioral sequences using LSTM.
 
         Args:
-            sequence_df (pd.DataFrame): A DataFrame containing a sequence of events,
-                                        with columns matching the trained features.
-
+            sequence_df: DataFrame with temporal features (27 columns)
+            return_details: Whether to return attention weights and feature importance
+            
         Returns:
-            float: The Mean Squared Error (MSE) reconstruction loss.
+            Dictionary with:
+                - anomaly_score: Reconstruction error (0-1)
+                - is_anomaly: Boolean flag
+                - confidence: Detection confidence
+                - attention_weights: Time step importance (if return_details=True)
+                - feature_errors: Per-feature reconstruction errors
         """
-        if len(sequence_df) != self.lstm_config['sequence_length']:
-            raise ValueError(f"Input sequence must have length {self.lstm_config['sequence_length']}.")
+        # Ensure correct features
+        if not all(feat in sequence_df.columns for feat in TEMPORAL_FEATURE_NAMES):
+            # Extract features if raw data provided
+            logger.info("Extracting temporal features from raw data...")
+            sequence_df = self._extract_temporal_features(sequence_df)
 
-        # Select and scale features
-        features = sequence_df[self.lstm_config['feature_columns']]
-        scaled_features = self.lstm_scaler.transform(features)
-        
-        sequence_tensor = torch.tensor([scaled_features], dtype=torch.float32).to(self.device)
+        # Select temporal features
+        feature_data = sequence_df[TEMPORAL_FEATURE_NAMES].values
 
+        # Convert to tensor: (1, seq_len, num_features)
+        sequence_tensor = torch.tensor(
+            feature_data,
+            dtype=torch.float32
+        ).unsqueeze(0).to(self.device)
+
+        # Run LSTM inference
         with torch.no_grad():
-            reconstructed = self.lstm_model(sequence_tensor)
-            loss = torch.nn.functional.mse_loss(reconstructed, sequence_tensor)
-        
-        return loss.item()
+            result = self.lstm_model.detect_anomalies(
+                sequence_tensor,
+                return_details=return_details
+            )
 
-    def detect_network_anomaly(self, node_features_df: pd.DataFrame, edge_df: pd.DataFrame):
+        # Convert tensors to Python types
+        output = {
+            'anomaly_score': float(result['anomaly_score']),
+            'is_anomaly': bool(result['is_anomaly']),
+            'confidence': float(result.get('confidence', 0.0))
+        }
+
+        if return_details:
+            output['attention_weights'] = result['attention_weights'].cpu().numpy().tolist()
+            output['feature_errors'] = {
+                name: float(error)
+                for name, error in zip(TEMPORAL_FEATURE_NAMES, result['feature_errors'].cpu().numpy())
+            }
+            output['top_anomalous_features'] = [
+                {'feature': name, 'error': float(error)}
+                for name, error in sorted(
+                    output['feature_errors'].items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:5]
+            ]
+
+        return output
+
+    def detect_network_anomaly(
+        self,
+        network_df: pd.DataFrame,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
         """
-        Performs inference on a network graph to get anomaly probabilities for each node.
+        Detect anomalies in network traffic using GNN.
 
         Args:
-            node_features_df (pd.DataFrame): DataFrame of current node features.
-            edge_df (pd.DataFrame): DataFrame of current network edges ('source', 'target').
-
+            network_df: DataFrame with network flow data
+            return_details: Whether to return attention and node scores
+            
         Returns:
-            dict: A dictionary mapping node_id to its anomaly probability.
+            Dictionary with:
+                - graph_anomaly_score: Network-level anomaly score (0-1)
+                - is_anomaly: Boolean flag
+                - node_scores: Per-node anomaly scores
+                - attention_weights: Graph attention patterns (if return_details=True)
+                - anomalous_nodes: Top anomalous nodes
         """
-        # --- Prepare graph data for inference ---
-        # Map node IDs to the integer indices used during training
-        node_ids = node_features_df['node_id'].tolist()
-        mapped_indices = [self.gnn_node_mapping.get(nid) for nid in node_ids]
+        # Build graph from network data
+        logger.debug("Building graph from network flows...")
+        
+        # Reset graph builder for fresh graph
+        self.graph_builder = NetworkGraphBuilder()
+        
+        # Add flows to graph builder
+        for _, row in network_df.iterrows():
+            self.graph_builder.add_network_flow(row.to_dict())
+        
+        # Finalize graph features
+        self.graph_builder.finalize_graph()
 
-        # Filter out any nodes not seen during training
-        valid_nodes_mask = [idx is not None for idx in mapped_indices]
-        if not any(valid_nodes_mask):
-            logging.warning("No known nodes in the provided graph data.")
-            return {}
-        
-        # Scale features
-        features = node_features_df[self.gnn_config['feature_columns']]
-        scaled_features = self.gnn_scaler.transform(features)
-        x = torch.tensor(scaled_features, dtype=torch.float32).to(self.device)
+        # Convert to PyTorch Geometric Data
+        edge_index, edge_weights, node_ids = self.graph_builder.to_edge_index()
+        feature_matrix, _, feature_names = self.graph_builder.get_node_feature_matrix()
 
-        # Map edges
-        edge_df['source_mapped'] = edge_df['source'].map(self.gnn_node_mapping)
-        edge_df['target_mapped'] = edge_df['target'].map(self.gnn_node_mapping)
-        valid_edges = edge_df.dropna(subset=['source_mapped', 'target_mapped'])
-        
-        edge_index = torch.tensor([
-            valid_edges['source_mapped'].values,
-            valid_edges['target_mapped'].values
-        ], dtype=torch.long).to(self.device)
-        
-        # --- Run GNN Inference ---
+        # Create Data object
+        data = Data(
+            x=torch.tensor(feature_matrix, dtype=torch.float32).to(self.device),
+            edge_index=torch.tensor(edge_index, dtype=torch.long).to(self.device)
+        )
+
+        # Run GNN inference
         with torch.no_grad():
-            log_probs = self.gnn_model(x, edge_index)
-            # Convert log probabilities to probabilities
-            probs = torch.exp(log_probs)
-            # Get the probability of the "anomaly" class (assuming class 1)
-            anomaly_probs = probs[:, 1].cpu().numpy()
+            result = self.gnn_model.detect_anomalies(
+                data,
+                return_details=return_details
+            )
 
-        # Map results back to original node IDs
-        results = {node_id: float(prob) for node_id, prob in zip(node_ids, anomaly_probs)}
-        
-        return results
+        # Convert results
+        output = {
+            'graph_anomaly_score': float(result['graph_score']),
+            'is_anomaly': bool(result['is_anomaly']),
+            'confidence': float(result.get('confidence', 0.0)),
+            'num_nodes': len(self.graph_builder.nodes),
+            'num_edges': len(self.graph_builder.edges)
+        }
 
-def main_demo():
-    """Demonstration of loading models and running a mock inference."""
-    # NOTE: This requires trained models to be present in the specified directories.
-    # The paths should point to where train_lstm.py and train_gnn.py saved their outputs.
-    LSTM_MODEL_PATH = "trained_models/lstm"
-    GNN_MODEL_PATH = "trained_models/gnn"
+        if return_details:
+            # Map node indices to IPs
+            node_list = node_ids
+            node_scores_dict = {
+                node_list[i]: float(score)
+                for i, score in enumerate(result['node_scores'].cpu().numpy())
+            }
 
-    try:
-        detector = AnomalyDetector(lstm_model_dir=LSTM_MODEL_PATH, gnn_model_dir=GNN_MODEL_PATH)
-        logging.info("AnomalyDetector initialized successfully.")
-    except FileNotFoundError:
-        logging.error("Model artifacts not found. Please run the training scripts first.")
-        return
+            output['node_scores'] = node_scores_dict
+            output['anomalous_nodes'] = [
+                {'node': node, 'score': score}
+                for node, score in sorted(
+                    node_scores_dict.items(),
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:10]  # Top 10 anomalous nodes
+            ]
 
-    # --- Demo Sysmon Anomaly Detection ---
-    logging.info("\n--- Running Sysmon Anomaly Detection Demo ---")
-    try:
-        # Create a dummy sequence DataFrame
-        lstm_config = detector.lstm_config
-        dummy_sysmon_data = pd.DataFrame(
-            data=np.random.rand(lstm_config['sequence_length'], len(lstm_config['feature_columns'])),
-            columns=lstm_config['feature_columns']
+            if 'attention_weights' in result:
+                output['attention_weights'] = [
+                    attn.cpu().numpy().tolist()
+                    for attn in result['attention_weights']
+                ]
+
+        return output
+
+    def detect_comprehensive(
+        self,
+        temporal_df: pd.DataFrame,
+        network_df: pd.DataFrame,
+        behavioral_features: Optional[pd.DataFrame] = None,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Comprehensive anomaly detection using both LSTM and GNN with ensemble scoring.
+
+        Args:
+            temporal_df: DataFrame with temporal behavioral data
+            network_df: DataFrame with network flow data
+            behavioral_features: Optional pre-extracted 27 behavioral features
+            return_details: Whether to return detailed explanations
+            
+        Returns:
+            Comprehensive threat assessment with:
+                - final_threat_score: Unified score (0-1)
+                - severity: LOW/MEDIUM/HIGH/CRITICAL
+                - confidence: Detection confidence
+                - lstm_analysis: LSTM results
+                - gnn_analysis: GNN results
+                - ensemble_details: Scoring breakdown
+                - explainability: Feature attributions and attention
+        """
+        logger.info("Running comprehensive anomaly detection...")
+
+        # 1. LSTM Temporal Analysis
+        lstm_result = self.detect_temporal_anomaly(temporal_df, return_details)
+        lstm_score = lstm_result['anomaly_score']
+
+        # 2. GNN Network Analysis
+        gnn_result = self.detect_network_anomaly(network_df, return_details)
+        gnn_score = gnn_result['graph_anomaly_score']
+
+        # 3. Extract behavioral features for ensemble
+        if behavioral_features is None:
+            behavioral_features = self._extract_behavioral_features(temporal_df, network_df)
+
+        behavioral_array = behavioral_features.values if isinstance(behavioral_features, pd.DataFrame) else behavioral_features
+
+        # 4. Ensemble Scoring
+        ensemble_result = self.ensemble_scorer.calculate_threat_score(
+            lstm_score=lstm_score,
+            gnn_score=gnn_score,
+            behavioral_features=behavioral_array,
+            return_details=True
         )
-        reconstruction_error = detector.detect_sysmon_anomaly(dummy_sysmon_data)
-        logging.info(f"Sysmon sequence reconstruction error: {reconstruction_error:.6f}")
-    except Exception as e:
-        logging.error(f"Error during Sysmon detection demo: {e}")
 
-    # --- Demo Network Anomaly Detection ---
-    logging.info("\n--- Running Network Anomaly Detection Demo ---")
-    try:
-        # Create a dummy graph
-        gnn_config = detector.gnn_config
-        node_ids = list(detector.gnn_node_mapping.keys())[:5] # Use first 5 known nodes
-        
-        dummy_node_features = pd.DataFrame(
-            data=np.random.rand(len(node_ids), len(gnn_config['feature_columns'])),
-            columns=gnn_config['feature_columns']
-        )
-        dummy_node_features['node_id'] = node_ids
-        
-        dummy_edge_list = pd.DataFrame({
-            'source': [node_ids[0], node_ids[1]],
-            'target': [node_ids[2], node_ids[3]]
+        # 5. Determine severity level
+        final_score = ensemble_result['final_score']
+        severity = self._calculate_severity(final_score, ensemble_result['confidence'])
+
+        # 6. Track temporal consistency
+        self.anomaly_history.append({
+            'timestamp': pd.Timestamp.now(),
+            'score': final_score,
+            'lstm_score': lstm_score,
+            'gnn_score': gnn_score
         })
 
-        network_anomaly_scores = detector.detect_network_anomaly(dummy_node_features, dummy_edge_list)
-        logging.info("Network node anomaly probabilities:")
-        for node_id, score in network_anomaly_scores.items():
-            logging.info(f"  Node {node_id}: {score:.4f}")
+        # 7. Build comprehensive output
+        output = {
+            'final_threat_score': final_score,
+            'severity': severity,
+            'confidence': ensemble_result['confidence'],
+            'is_anomaly': ensemble_result['is_anomaly'],
+            'lstm_analysis': lstm_result,
+            'gnn_analysis': gnn_result,
+            'ensemble_details': {
+                'model_agreement': ensemble_result.get('model_agreement', 0.0),
+                'temporal_consistency': ensemble_result.get('temporal_consistency', 0.0),
+                'trend': ensemble_result.get('trend', 'stable')
+            },
+            'timestamp': pd.Timestamp.now().isoformat()
+        }
+
+        if return_details:
+            output['explainability'] = {
+                'top_temporal_features': lstm_result.get('top_anomalous_features', []),
+                'anomalous_nodes': gnn_result.get('anomalous_nodes', []),
+                'feature_importance': ensemble_result.get('feature_importance', {}),
+                'attention_lstm': lstm_result.get('attention_weights', []),
+                'attention_gnn': gnn_result.get('attention_weights', [])
+            }
+
+        logger.info(f"Detection complete: Score={final_score:.4f}, Severity={severity}")
+
+        return output
+
+    def _extract_temporal_features(self, raw_df: pd.DataFrame) -> pd.DataFrame:
+        """Extract 27 temporal features from raw data."""
+        # Use feature engineering pipeline
+        features_df = extract_all_features(raw_df)
+        # Return DataFrame with temporal features
+        temporal_features = features_df[TEMPORAL_FEATURE_NAMES]
+        if isinstance(temporal_features, pd.Series):
+            return temporal_features.to_frame().T
+        return temporal_features
+
+    def _extract_behavioral_features(
+        self,
+        temporal_df: pd.DataFrame,
+        network_df: pd.DataFrame
+    ) -> np.ndarray:
+        """Extract 27 behavioral features for ensemble."""
+        # Combine temporal and network data, extract features
+        combined_df = pd.concat([temporal_df, network_df], axis=0, ignore_index=True)
+        features_df = extract_all_features(combined_df)
+
+        # Select 27 behavioral features
+        behavioral_cols = TEMPORAL_FEATURE_NAMES[:27]
+        return features_df[behavioral_cols].iloc[-1].values
+
+    def _calculate_severity(self, score: float, confidence: float) -> str:
+        """
+        Calculate threat severity based on score and confidence.
+        
+        Severity Levels:
+        - CRITICAL: score > 0.9, high confidence
+        - HIGH: score > 0.75
+        - MEDIUM: score > 0.5
+        - LOW: score <= 0.5
+        """
+        if score > 0.9 and confidence > 0.8:
+            return 'CRITICAL'
+        elif score > 0.75:
+            return 'HIGH'
+        elif score > 0.5:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+
+    def get_anomaly_trend(self, window: int = 10) -> Dict[str, Any]:
+        """
+        Get anomaly trend over recent detections.
+        
+        Args:
+            window: Number of recent detections to analyze
+            
+        Returns:
+            Trend analysis with statistics
+        """
+        if len(self.anomaly_history) < 2:
+            return {'trend': 'insufficient_data', 'samples': len(self.anomaly_history)}
+
+        recent = list(self.anomaly_history)[-window:]
+        scores = [entry['score'] for entry in recent]
+
+        # Calculate trend
+        if len(scores) >= 3:
+            recent_avg = np.mean(scores[-3:])
+            older_avg = np.mean(scores[:-3]) if len(scores) > 3 else scores[0]
+
+            if recent_avg > older_avg * 1.2:
+                trend = 'increasing'
+            elif recent_avg < older_avg * 0.8:
+                trend = 'decreasing'
+            else:
+                trend = 'stable'
+        else:
+            trend = 'stable'
+
+        return {
+            'trend': trend,
+            'mean_score': float(np.mean(scores)),
+            'max_score': float(np.max(scores)),
+            'min_score': float(np.min(scores)),
+            'std_score': float(np.std(scores)),
+            'samples': len(scores)
+        }
+
+    def reset(self):
+        """Reset temporal tracking state."""
+        self.anomaly_history.clear()
+        self.ensemble_scorer.reset_temporal_state()
+        logger.info("Detector state reset")
+
+
+def main_demo():
+    """Demonstration of enhanced anomaly detector."""
+    logger.info("=== Enhanced Anomaly Detector Demo ===\n")
+
+    # Paths to trained models
+    LSTM_MODEL_PATH = "data/models/lstm_trained"
+    GNN_MODEL_PATH = "data/models/gnn_trained"
+    ENSEMBLE_MODEL_PATH = "data/models/ensemble_trained"
+
+    try:
+        # Initialize detector
+        detector = EnhancedAnomalyDetector(
+            lstm_model_path=LSTM_MODEL_PATH,
+            gnn_model_path=GNN_MODEL_PATH,
+            ensemble_model_path=ENSEMBLE_MODEL_PATH
+        )
+        logger.info("✓ Detector initialized\n")
+
+        # Demo 1: Temporal Anomaly Detection
+        logger.info("--- Demo 1: Temporal Anomaly Detection ---")
+        temporal_data = pd.DataFrame(
+            np.random.rand(20, 27),  # 20 timesteps, 27 features
+            columns=TEMPORAL_FEATURE_NAMES
+        )
+
+        lstm_result = detector.detect_temporal_anomaly(temporal_data)
+        logger.info(f"LSTM Score: {lstm_result['anomaly_score']:.4f}")
+        logger.info(f"Is Anomaly: {lstm_result['is_anomaly']}")
+        logger.info(f"Top Anomalous Features: {lstm_result['top_anomalous_features'][:3]}\n")
+
+        # Demo 2: Network Anomaly Detection
+        logger.info("--- Demo 2: Network Anomaly Detection ---")
+        network_data = pd.DataFrame({
+            'src_ip': ['192.168.1.1', '192.168.1.2', '192.168.1.1'],
+            'dst_ip': ['10.0.0.1', '10.0.0.2', '10.0.0.2'],
+            'src_port': [443, 80, 443],
+            'dst_port': [12345, 54321, 12346],
+            'protocol': ['TCP', 'TCP', 'TCP'],
+            'bytes_sent': [1024, 2048, 512],
+            'bytes_received': [512, 1024, 256],
+            'packets_sent': [10, 20, 5],
+            'packets_received': [5, 10, 3],
+            'timestamp': pd.date_range('2024-01-01', periods=3, freq='1S')
+        })
+
+        gnn_result = detector.detect_network_anomaly(network_data)
+        logger.info(f"GNN Score: {gnn_result['graph_anomaly_score']:.4f}")
+        logger.info(f"Is Anomaly: {gnn_result['is_anomaly']}")
+        logger.info(f"Anomalous Nodes: {gnn_result.get('anomalous_nodes', [])[:3]}\n")
+
+        # Demo 3: Comprehensive Detection
+        logger.info("--- Demo 3: Comprehensive Detection ---")
+        comprehensive_result = detector.detect_comprehensive(
+            temporal_df=temporal_data,
+            network_df=network_data
+        )
+
+        logger.info(f"Final Threat Score: {comprehensive_result['final_threat_score']:.4f}")
+        logger.info(f"Severity: {comprehensive_result['severity']}")
+        logger.info(f"Confidence: {comprehensive_result['confidence']:.4f}")
+        logger.info(f"Model Agreement: {comprehensive_result['ensemble_details']['model_agreement']:.4f}")
+
+        logger.info("\n✅ Demo complete!")
+
+    except FileNotFoundError as e:
+        logger.error(f"Model files not found: {e}")
+        logger.info("Please train models first using:")
+        logger.info("  python src/training/train_lstm.py --data <data> --output data/models/lstm_trained")
+        logger.info("  python src/training/train_gnn.py --data <data> --output data/models/gnn_trained")
     except Exception as e:
-        logging.error(f"Error during GNN detection demo: {e}")
+        logger.error(f"Error during demo: {e}", exc_info=True)
 
 
 if __name__ == '__main__':
-    import numpy as np
-    # This main function is for demonstration purposes.
-    # To run it, you must first have trained models saved by the training scripts.
     main_demo()

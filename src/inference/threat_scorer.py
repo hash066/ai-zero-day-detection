@@ -1,152 +1,340 @@
 """
-Calculates the final zero-day threat score for an event or entity.
+Unified Threat Scorer - Simplified Inference Coordinator.
 
-This module bridges the gap between the raw anomaly scores produced by the
-AnomalyDetector and the final, interpretable threat score by using the
-EnsembleScorer.
+Provides a simple interface that coordinates:
+- Enhanced Anomaly Detector (LSTM + GNN + Ensemble)
+- Enhanced Response Engine (Alerting + Isolation)
+
+This is the main entry point for real-time threat detection and response.
 """
 
-from pathlib import Path
 import logging
+from pathlib import Path
+from typing import Dict, Any, Optional
+import pandas as pd
 
-# Adjusting path to import from sibling directories
-import sys
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
-from models.ensemble_scorer import EnsembleScorer
-from inference.anomaly_detector import AnomalyDetector
+from .anomaly_detector import EnhancedAnomalyDetector
+from .response_engine import EnhancedResponseEngine
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 
 class ThreatScorer:
     """
-    Orchestrates the calculation of a final threat score.
-
-    This class takes anomaly scores for a specific entity (e.g., a process or a device)
-    from different models and uses an ensemble method to combine them into a single score.
+    Unified threat scoring interface for zero-day attack detection.
+    
+    Coordinates:
+    1. Enhanced Anomaly Detection (LSTM + GNN + Ensemble)
+    2. Automated Response (Alerting + Isolation + Logging)
+    
+    Usage:
+        # Initialize
+        scorer = ThreatScorer(
+            lstm_model_path="data/models/lstm_trained",
+            gnn_model_path="data/models/gnn_trained",
+            alert_webhook_url="https://hooks.slack.com/..."
+        )
+        
+        # Score a threat
+        result = scorer.score_threat(
+            temporal_data=temporal_df,
+            network_data=network_df,
+            entity_id="192.168.1.100"
+        )
+        
+        # Get threat score
+        print(f"Threat Score: {result['final_threat_score']}")
+        print(f"Severity: {result['severity']}")
     """
 
-    def __init__(self, lstm_weight: float = 0.6, gnn_weight: float = 0.4, max_lstm_error: float = 1.0):
-        """
-        Initialize the ThreatScorer.
-
-        Args:
-            lstm_weight (float): The weight for the LSTM model's score.
-            gnn_weight (float): The weight for the GNN model's score.
-            max_lstm_error (float): The maximum expected reconstruction error for
-                                    the LSTM, used for normalization. This value
-                                    should ideally be determined from a validation
-                                    set of normal data.
-        """
-        self.ensemble_scorer = EnsembleScorer(lstm_weight=lstm_weight, gnn_weight=gnn_weight)
-        self.max_lstm_error = max_lstm_error
-        logging.info(f"ThreatScorer initialized with weights: LSTM={lstm_weight}, GNN={gnn_weight}")
-
-    def score_event(
+    def __init__(
         self,
-        lstm_score: float,
-        gnn_score: float
-    ) -> float:
+        lstm_model_path: str,
+        gnn_model_path: str,
+        ensemble_model_path: Optional[str] = None,
+        alert_webhook_url: Optional[str] = None,
+        firewall_api_url: Optional[str] = None,
+        isolation_api_key: Optional[str] = None,
+        incident_log_path: str = "data/incidents/incident_log.jsonl",
+        auto_respond: bool = True
+    ):
         """
-        Calculates the threat score for a given set of model outputs.
+        Initialize Unified Threat Scorer.
 
         Args:
-            lstm_score (float): The reconstruction error from the LSTM autoencoder.
-            gnn_score (float): The anomaly probability from the GNN classifier.
-
-        Returns:
-            float: The final, combined threat score between 0 and 1.
+            lstm_model_path: Path to trained LSTM model
+            gnn_model_path: Path to trained GNN model
+            ensemble_model_path: Path to trained ensemble scorer (optional)
+            alert_webhook_url: Webhook URL for alerts
+            firewall_api_url: Firewall API for network isolation
+            isolation_api_key: API key for isolation
+            incident_log_path: Path to incident log
+            auto_respond: Whether to automatically trigger responses
         """
-        if lstm_score < 0:
-            logging.warning(f"Received negative LSTM score ({lstm_score}), clamping to 0.")
-            lstm_score = 0
-        if not (0.0 <= gnn_score <= 1.0):
-            logging.warning(f"Received GNN score outside [0, 1] ({gnn_score}), clamping.")
-            gnn_score = max(0.0, min(1.0, gnn_score))
+        logger.info("Initializing Unified Threat Scorer...")
+        
+        # Initialize anomaly detector
+        self.detector = EnhancedAnomalyDetector(
+            lstm_model_path=lstm_model_path,
+            gnn_model_path=gnn_model_path,
+            ensemble_model_path=ensemble_model_path
+        )
+        
+        # Initialize response engine
+        self.response_engine = EnhancedResponseEngine(
+            alert_webhook_url=alert_webhook_url,
+            firewall_api_url=firewall_api_url,
+            isolation_api_key=isolation_api_key,
+            incident_log_path=incident_log_path
+        )
+        
+        self.auto_respond = auto_respond
+        
+        logger.info("✓ Threat Scorer initialized successfully")
 
-        final_score = self.ensemble_scorer.calculate_threat_score(
-            lstm_reconstruction_error=lstm_score,
-            gnn_anomaly_probability=gnn_score,
-            max_expected_lstm_error=self.max_lstm_error
+    def score_threat(
+        self,
+        temporal_data: pd.DataFrame,
+        network_data: pd.DataFrame,
+        entity_id: str,
+        entity_type: str = 'ip',
+        auto_respond: Optional[bool] = None,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Score a potential threat and optionally trigger response.
+        
+        Args:
+            temporal_data: DataFrame with temporal behavioral data
+            network_data: DataFrame with network flow data
+            entity_id: Entity identifier (IP, process GUID, etc.)
+            entity_type: Type of entity ('ip', 'process', 'device')
+            auto_respond: Override auto_respond setting (optional)
+            return_details: Whether to return detailed analysis
+            
+        Returns:
+            Comprehensive threat assessment with:
+                - final_threat_score: Score (0-1)
+                - severity: LOW/MEDIUM/HIGH/CRITICAL
+                - confidence: Detection confidence
+                - is_anomaly: Boolean flag
+                - actions_taken: List of response actions (if auto_respond=True)
+                - explainability: Feature attributions and attention
+        """
+        logger.info(f"Scoring threat for entity: {entity_id}")
+        
+        # 1. Detect anomaly using enhanced models
+        detection_result = self.detector.detect_comprehensive(
+            temporal_df=temporal_data,
+            network_df=network_data,
+            return_details=return_details
         )
         
-        logging.debug(
-            f"Scoring event: LSTM_err={lstm_score:.4f}, GNN_prob={gnn_score:.4f} -> Final Score={final_score:.4f}"
+        # 2. Trigger automated response if enabled
+        should_respond = auto_respond if auto_respond is not None else self.auto_respond
+        
+        if should_respond and detection_result['is_anomaly']:
+            response_result = self.response_engine.process_detection(
+                detection_result=detection_result,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                source_data={
+                    'temporal_samples': len(temporal_data),
+                    'network_flows': len(network_data)
+                }
+            )
+            detection_result['response'] = response_result
+        else:
+            detection_result['response'] = {'actions_taken': [], 'reason': 'auto_respond_disabled'}
+        
+        logger.info(f"Threat scoring complete: Score={detection_result['final_threat_score']:.4f}, "
+                   f"Severity={detection_result['severity']}")
+        
+        return detection_result
+
+    def score_temporal_only(
+        self,
+        temporal_data: pd.DataFrame,
+        entity_id: str,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Score threat using LSTM temporal analysis only.
+        
+        Useful when network data is unavailable.
+        """
+        logger.info(f"Scoring temporal threat for entity: {entity_id}")
+        
+        result = self.detector.detect_temporal_anomaly(
+            sequence_df=temporal_data,
+            return_details=return_details
         )
         
-        return final_score
+        result['entity_id'] = entity_id
+        result['analysis_type'] = 'temporal_only'
+        
+        return result
+
+    def score_network_only(
+        self,
+        network_data: pd.DataFrame,
+        entity_id: str,
+        return_details: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Score threat using GNN network analysis only.
+        
+        Useful when temporal data is unavailable.
+        """
+        logger.info(f"Scoring network threat for entity: {entity_id}")
+        
+        result = self.detector.detect_network_anomaly(
+            network_df=network_data,
+            return_details=return_details
+        )
+        
+        result['entity_id'] = entity_id
+        result['analysis_type'] = 'network_only'
+        
+        return result
+
+    def mark_false_positive(
+        self,
+        entity_id: str,
+        timestamp: str,
+        reason: Optional[str] = None
+    ):
+        """
+        Mark an alert as false positive for model improvement.
+        
+        Args:
+            entity_id: Entity that was incorrectly flagged
+            timestamp: Timestamp of the original alert
+            reason: Reason for false positive (optional)
+        """
+        self.response_engine.mark_false_positive(entity_id, timestamp, reason)
+        logger.info(f"Marked {entity_id} as false positive")
+
+    def generate_report(
+        self,
+        start_time=None,
+        end_time=None,
+        min_severity='MEDIUM'
+    ) -> Dict[str, Any]:
+        """
+        Generate comprehensive incident report.
+        
+        Args:
+            start_time: Report start time (default: last 24 hours)
+            end_time: Report end time (default: now)
+            min_severity: Minimum severity to include
+            
+        Returns:
+            Report with statistics and incident list
+        """
+        return self.response_engine.generate_incident_report(
+            start_time=start_time,
+            end_time=end_time,
+            min_severity=min_severity
+        )
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get current threat scorer statistics."""
+        detector_trend = self.detector.get_anomaly_trend()
+        response_stats = self.response_engine.get_statistics()
+        
+        return {
+            'detector': detector_trend,
+            'response_engine': response_stats
+        }
+
+    def reset(self):
+        """Reset scorer state."""
+        self.detector.reset()
+        logger.info("Threat scorer reset")
+
 
 def main_demo():
-    """
-    Demonstrates the full pipeline from AnomalyDetector to ThreatScorer.
-    """
-    # This demo requires trained models to be present.
-    LSTM_MODEL_PATH = "trained_models/lstm"
-    GNN_MODEL_PATH = "trained_models/gnn"
-
-    logging.info("--- Threat Scoring Demo ---")
-
-    # --- 1. Initialize Systems ---
+    """Demonstration of Unified Threat Scorer."""
+    import numpy as np
+    from models.lstm_autoencoder import TEMPORAL_FEATURE_NAMES
+    
+    logger.info("=== Unified Threat Scorer Demo ===\n")
+    
     try:
-        anomaly_detector = AnomalyDetector(lstm_model_dir=LSTM_MODEL_PATH, gnn_model_dir=GNN_MODEL_PATH)
-        threat_scorer = ThreatScorer(lstm_weight=0.6, gnn_weight=0.4, max_lstm_error=0.8)
-        logging.info("Systems initialized successfully.")
-    except FileNotFoundError:
-        logging.error("Model artifacts not found. Please run training scripts first.")
-        return
-    except Exception as e:
-        logging.error(f"Initialization failed: {e}")
-        return
-
-    # --- 2. Simulate Incoming Data and Get Anomaly Scores ---
-    # (Using dummy data as in the anomaly_detector demo)
-    try:
-        # Sysmon data for a process sequence
-        lstm_config = anomaly_detector.lstm_config
-        dummy_sysmon_data = pd.DataFrame(
-            data=np.random.rand(lstm_config['sequence_length'], len(lstm_config['feature_columns'])),
-            columns=lstm_config['feature_columns']
+        # Initialize scorer
+        scorer = ThreatScorer(
+            lstm_model_path="data/models/lstm_trained",
+            gnn_model_path="data/models/gnn_trained",
+            incident_log_path="data/incidents/demo_threats.jsonl",
+            auto_respond=True
         )
-        lstm_anomaly_score = anomaly_detector.detect_sysmon_anomaly(dummy_sysmon_data)
-        logging.info(f"Detected LSTM reconstruction error: {lstm_anomaly_score:.4f}")
-
-        # Network data for a specific device (node)
-        gnn_config = anomaly_detector.gnn_config
-        node_ids = list(anomaly_detector.gnn_node_mapping.keys())[:5]
-        target_node = node_ids[0]
         
-        dummy_node_features = pd.DataFrame(
-            data=np.random.rand(len(node_ids), len(gnn_config['feature_columns'])),
-            columns=gnn_config['feature_columns']
+        # Create sample data
+        logger.info("--- Creating Sample Data ---")
+        temporal_data = pd.DataFrame(
+            np.random.rand(20, 27),
+            columns=TEMPORAL_FEATURE_NAMES
         )
-        dummy_node_features['node_id'] = node_ids
         
-        dummy_edge_list = pd.DataFrame({'source': [node_ids[1]], 'target': [target_node]})
+        network_data = pd.DataFrame({
+            'src_ip': ['192.168.1.50'] * 10,
+            'dst_ip': [f'10.0.0.{i}' for i in range(10)],
+            'src_port': [443] * 10,
+            'dst_port': np.random.randint(10000, 60000, 10),
+            'protocol': ['TCP'] * 10,
+            'bytes_sent': np.random.randint(100, 5000, 10),
+            'bytes_received': np.random.randint(100, 5000, 10),
+            'packets_sent': np.random.randint(1, 50, 10),
+            'packets_received': np.random.randint(1, 50, 10),
+            'timestamp': pd.date_range('2024-01-01', periods=10, freq='1S')
+        })
         
-        network_scores = anomaly_detector.detect_network_anomaly(dummy_node_features, dummy_edge_list)
-        gnn_anomaly_score = network_scores.get(target_node, 0.0)
-        logging.info(f"Detected GNN anomaly probability for node '{target_node}': {gnn_anomaly_score:.4f}")
+        # Score threat
+        logger.info("\n--- Scoring Threat ---")
+        result = scorer.score_threat(
+            temporal_data=temporal_data,
+            network_data=network_data,
+            entity_id='192.168.1.50',
+            entity_type='ip'
+        )
         
+        # Display results
+        logger.info(f"\n📊 Threat Assessment Results:")
+        logger.info(f"  Entity: {result.get('entity_id', '192.168.1.50')}")
+        logger.info(f"  Final Score: {result['final_threat_score']:.4f}")
+        logger.info(f"  Severity: {result['severity']}")
+        logger.info(f"  Confidence: {result['confidence']:.2%}")
+        logger.info(f"  Is Anomaly: {result['is_anomaly']}")
+        
+        if 'response' in result:
+            logger.info(f"  Actions Taken: {result['response']['actions_taken']}")
+        
+        if 'explainability' in result:
+            top_features = result['explainability'].get('top_temporal_features', [])[:3]
+            if top_features:
+                logger.info(f"\n  Top Anomalous Features:")
+                for feat in top_features:
+                    logger.info(f"    • {feat['feature']}: {feat['error']:.4f}")
+        
+        # Get statistics
+        logger.info("\n--- Statistics ---")
+        stats = scorer.get_statistics()
+        logger.info(f"  Detection Trend: {stats['detector']['trend']}")
+        logger.info(f"  Total Alerts: {stats['response_engine']['total_alerts']}")
+        logger.info(f"  Critical Alerts: {stats['response_engine']['by_severity']['CRITICAL']}")
+        
+        logger.info("\n✅ Demo complete!")
+        
+    except FileNotFoundError as e:
+        logger.error(f"Model files not found: {e}")
+        logger.info("\nPlease train models first:")
+        logger.info("  1. python src/training/train_lstm.py --data <data> --output data/models/lstm_trained")
+        logger.info("  2. python src/training/train_gnn.py --data <data> --output data/models/gnn_trained")
     except Exception as e:
-        logging.error(f"Error during anomaly detection phase: {e}")
-        return
+        logger.error(f"Error during demo: {e}", exc_info=True)
 
-    # --- 3. Calculate Final Threat Score ---
-    final_threat_score = threat_scorer.score_event(
-        lstm_score=lstm_anomaly_score,
-        gnn_score=gnn_anomaly_score
-    )
-
-    logging.info(f"\n--- Final Result ---")
-    logging.info(f"Combined Threat Score for the event/entity: {final_threat_score:.4f}")
-
-    if final_threat_score > 0.7:
-        logging.warning("Threat score exceeds threshold! Alerting security team.")
-    else:
-        logging.info("Threat score is below threshold. Event considered normal.")
 
 if __name__ == '__main__':
-    import numpy as np
-    import pandas as pd
-    # This main function is for demonstration purposes.
     main_demo()
