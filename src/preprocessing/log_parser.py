@@ -16,9 +16,71 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+class SysmonLogParser:
+    """Specialized parser for Sysmon event logs with parent process tracking."""
+
+    @staticmethod
+    def parse_sysmon_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Parse a single Sysmon event with proper parent process extraction.
+
+        Args:
+            event_data: Raw Sysmon event data
+
+        Returns:
+            Parsed event with parent_process_guid field
+        """
+        parsed = event_data.copy()
+
+        # Extract parent process GUID from EventData
+        event_data_section = event_data.get('EventData', {})
+        if isinstance(event_data_section, dict):
+            parsed['parent_process_guid'] = event_data_section.get('ParentProcessGuid', '')
+            parsed['parent_process_id'] = event_data_section.get('ParentProcessId', '')
+            parsed['parent_image'] = event_data_section.get('ParentImage', '')
+        else:
+            # Handle string format or other formats
+            parsed['parent_process_guid'] = ''
+            parsed['parent_process_id'] = ''
+            parsed['parent_image'] = ''
+
+        return parsed
+
+    @staticmethod
+    def parse_sysmon_csv(input_path: str, output_path: str):
+        """
+        Parse Sysmon CSV with proper parent process tracking.
+
+        Args:
+            input_path: Path to raw Sysmon CSV
+            output_path: Path to save parsed CSV
+        """
+        logger.info(f"Parsing Sysmon CSV: {input_path}")
+
+        try:
+            df = pd.read_csv(input_path)
+
+            # Parse each event to extract parent process info
+            parsed_events = []
+            for _, row in df.iterrows():
+                event_dict = row.to_dict()
+                parsed_event = SysmonLogParser.parse_sysmon_event(event_dict)
+                parsed_events.append(parsed_event)
+
+            parsed_df = pd.DataFrame(parsed_events)
+            parsed_df.to_csv(output_path, index=False)
+
+            logger.info(f"Parsed {len(parsed_df)} Sysmon events with parent process tracking")
+            logger.info(f"Saved to: {output_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to parse Sysmon CSV: {e}")
+            raise
+
+
 class JSONLogParser:
     """Parse JSON-formatted logs (Sysmon, network data, etc.)."""
-    
+
     @staticmethod
     def parse_file(file_path: str) -> pd.DataFrame:
         """

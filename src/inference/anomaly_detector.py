@@ -20,16 +20,53 @@ from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
 import numpy as np
 import joblib
-from torch_geometric.data import Data
 from collections import deque
 import sys
+
+# Optional import for torch_geometric
+try:
+    from torch_geometric.data import Data
+    TORCH_GEOMETRIC_AVAILABLE = True
+except ImportError:
+    TORCH_GEOMETRIC_AVAILABLE = False
+    Data = None
 
 # Adjusting path to import from sibling directories
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from models.lstm_autoencoder import EnhancedLSTMAutoencoder, TEMPORAL_FEATURE_NAMES
-from models.gnn_detector import EnhancedGNNDetector, NODE_FEATURE_NAMES
-from models.ensemble_scorer import EnhancedEnsembleScorer
+try:
+    from models.lstm_autoencoder import EnhancedLSTMAutoencoder
+    LSTM_AVAILABLE = True
+except ImportError:
+    LSTM_AVAILABLE = False
+
+try:
+    from models.gnn_detector import EnhancedGNNDetector
+    GNN_AVAILABLE = True
+except ImportError:
+    GNN_AVAILABLE = False
+
+try:
+    from models.ensemble_scorer import EnhancedEnsembleScorer
+    ENSEMBLE_AVAILABLE = True
+except ImportError:
+    ENSEMBLE_AVAILABLE = False
+
+# Feature names for compatibility
+TEMPORAL_FEATURE_NAMES = [
+    'src_port_entropy', 'dst_port_entropy', 'src_ip_entropy', 'dst_ip_entropy',
+    'packet_size_entropy', 'mean_inter_arrival', 'std_inter_arrival',
+    'cv_inter_arrival', 'burstiness', 'periodicity_score', 'peak_hour',
+    'off_hours_ratio', 'hour_entropy', 'connection_diversity', 'fan_out_ratio',
+    'rare_protocol_ratio', 'protocol_switching_rate', 'size_mean', 'size_std',
+    'size_skewness', 'size_kurtosis', 'small_packet_ratio', 'large_packet_ratio'
+]
+
+NODE_FEATURE_NAMES = [
+    'total_bytes_sent', 'total_bytes_received', 'total_packets_sent',
+    'total_packets_received', 'unique_connections', 'avg_packet_size',
+    'port_diversity', 'protocol_diversity', 'time_active'
+]
 from preprocessing.graph_builder import NetworkGraphBuilder
 from preprocessing.feature_engineering import extract_all_features
 
@@ -132,15 +169,21 @@ class EnhancedAnomalyDetector:
 
         return model, config
 
-    def _load_gnn_model(self, model_dir: str) -> Tuple[EnhancedGNNDetector, Dict]:
+    def _load_gnn_model(self, model_dir: str):
         """Load GNN model with enhanced features."""
+        if not GNN_AVAILABLE:
+            logger.warning("GNN model not available (torch_geometric not installed)")
+            return None, {}
+
         logger.info(f"Loading Enhanced GNN model from {model_dir}...")
         model_path = Path(model_dir)
 
         # Load configuration
         config_path = model_path / "config.json"
-        with open(config_path, 'r') as f:
-            config = json.load(f)
+        config = {}
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
 
         # Create enhanced model
         model = EnhancedGNNDetector(
@@ -277,13 +320,15 @@ class EnhancedAnomalyDetector:
         """
         # Build graph from network data
         logger.debug("Building graph from network flows...")
-        
+
         # Reset graph builder for fresh graph
         self.graph_builder = NetworkGraphBuilder()
-        
-        # Add flows to graph builder
-        for _, row in network_df.iterrows():
-            self.graph_builder.add_network_flow(row.to_dict())
+
+        # Add flows to graph builder (vectorized approach)
+        # Convert DataFrame to list of dicts efficiently
+        flow_records = network_df.to_dict('records')
+        for flow_dict in flow_records:  # Much faster than iterrows()
+            self.graph_builder.add_network_flow(flow_dict)
         
         # Finalize graph features
         self.graph_builder.finalize_graph()

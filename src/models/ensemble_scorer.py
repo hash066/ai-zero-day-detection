@@ -111,7 +111,9 @@ class EnhancedEnsembleScorer:
         feature_dim: int = 27,
         use_learned_weights: bool = True,
         temporal_window: int = 10,
-        confidence_threshold: float = 0.7
+        confidence_threshold: float = 0.7,
+        lstm_weight: float = 0.6,
+        gnn_weight: float = 0.4
     ):
         """
         Initialize Enhanced Ensemble Scorer.
