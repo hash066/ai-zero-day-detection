@@ -231,15 +231,18 @@ class DataValidator:
         # Check for NaN/inf values
         if df.isnull().any().any():
             results['errors'].append("NaN values found in temporal features")
+            results['valid'] = False
 
         if np.isinf(df.select_dtypes(include=[np.number])).any().any():
             results['errors'].append("Infinite values found in temporal features")
+            results['valid'] = False
 
         # Validate ranges
         if 'src_port_entropy' in df.columns:
             invalid_entropy = df[~df['src_port_entropy'].between(0, 10)]
             if not invalid_entropy.empty:
                 results['errors'].append("Invalid entropy values found")
+                results['valid'] = False
 
         results['stats'] = {
             'rows': len(df),

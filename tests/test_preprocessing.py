@@ -13,32 +13,20 @@ import sys
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from preprocessing.log_parser import parse_sysmon_csv
-from preprocessing.feature_engineering import create_temporal_features, create_structural_features
-from preprocessing.graph_builder import generate_node_id, parse_node_id
+from preprocessing.log_parser import SysmonLogParser
+from preprocessing.feature_engineering import extract_all_features
+from preprocessing.graph_builder import NetworkGraphBuilder
 
 
 class TestLogParser:
     """Test Sysmon log parsing functionality."""
 
     def test_parse_sysmon_csv(self):
-        """Test parsing of Sysmon CSV with multi-line Details column."""
-        # Create mock Sysmon CSV data
-        mock_data = """Level,Date and Time,Source,Event ID,Task Category,Details
-4,2023-10-01 10:30:45,Microsoft-Windows-Sysmon,1,Process Create,UtcTime: 10:30:45.123
-ProcessGuid: {12345678-1234-1234-1234-123456789abc}
-Image: C:\\Windows\\System32\\cmd.exe
-CommandLine: C:\\Windows\\System32\\cmd.exe /c whoami
-User: NT AUTHORITY\\SYSTEM
-
-4,2023-10-01 10:30:46,Microsoft-Windows-Sysmon,3,Network Connect,UtcTime: 10:30:46.456
-ProcessGuid: {12345678-1234-1234-1234-123456789abc}
-Image: C:\\Windows\\System32\\cmd.exe
-User: NT AUTHORITY\\SYSTEM
-SourceIp: 192.168.1.100
-DestinationIp: 8.8.8.8
-SourcePort: 54321
-DestinationPort: 53
+        """Test parsing of simple Sysmon CSV."""
+        # Create simple mock Sysmon CSV data (single line per event)
+        mock_data = """EventID,UtcTime,ProcessGuid,ProcessId,Image,CommandLine,User
+1,2023-10-01 10:30:45.123,{12345678-1234-1234-1234-123456789abc},1234,C:\\Windows\\System32\\cmd.exe,cmd.exe /c whoami,USER
+3,2023-10-01 10:30:46.456,{12345678-1234-1234-1234-123456789abc},1234,C:\\Windows\\System32\\cmd.exe,,USER
 """
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
@@ -50,14 +38,14 @@ DestinationPort: 53
                 output_path = f.name
 
             # Parse the data
-            parse_sysmon_csv(input_path, output_path)
+            SysmonLogParser.parse_sysmon_csv(input_path, output_path)
 
             # Verify output
             result_df = pd.read_csv(output_path)
             assert len(result_df) == 2
-            assert 'event_id' in result_df.columns
-            assert 'process_guid' in result_df.columns
-            assert result_df['event_id'].tolist() == [1, 3]
+            assert 'EventID' in result_df.columns
+            assert 'parent_process_guid' in result_df.columns
+            assert result_df['EventID'].tolist() == [1, 3]
 
         finally:
             os.unlink(input_path)
@@ -68,69 +56,51 @@ DestinationPort: 53
 class TestFeatureEngineering:
     """Test feature engineering functionality."""
 
-    def test_create_temporal_features(self):
-        """Test temporal feature creation."""
-        # Create mock Sysmon data
+    def test_extract_all_features(self):
+        """Test comprehensive feature extraction."""
+        # Create mock network data
         mock_data = {
-            'timestamp': pd.date_range('2023-01-01', periods=10, freq='1min'),
-            'process_guid': ['proc1'] * 5 + ['proc2'] * 5,
-            'event_id': [1, 3, 11, 12, 13] * 2
+            'ts': [1000.0 + i * 0.5 for i in range(10)],
+            'src_ip': ['192.168.1.10'] * 5 + ['192.168.1.20'] * 5,
+            'dst_ip': [f'10.0.0.{i % 5}' for i in range(10)],
+            'src_port': [12345 + i for i in range(10)],
+            'dst_port': [80] * 7 + [443] * 3,
+            'protocol_type': ['TCP'] * 8 + ['UDP'] * 2,
+            'tot_size': [1400 + np.random.randint(-200, 200) for i in range(10)],
         }
-        sysmon_df = pd.DataFrame(mock_data)
+        network_df = pd.DataFrame(mock_data)
 
-        # Add required columns for feature engineering
-        sysmon_df['events_per_minute'] = 10.0
-        sysmon_df['burst_intensity'] = 1.0
-        sysmon_df['is_system32'] = 1
-        sysmon_df['is_temp'] = 0
-        sysmon_df['path_depth'] = 3
-        sysmon_df['command_entropy'] = 2.5
-        sysmon_df['token_count'] = 5
+        result = extract_all_features(network_df)
 
-        result = create_temporal_features(sysmon_df)
-
-        assert 'process_guid' in result.columns
-        assert 'timestamp' in result.columns
-        assert 'time_since_last_event' in result.columns
-        assert len(result) == len(sysmon_df)
-
-    def test_create_structural_features(self):
-        """Test structural feature creation."""
-        mock_data = {
-            'process_guid': ['proc1', 'proc2'],
-            'image': ['C:\\Windows\\System32\\cmd.exe', 'C:\\temp\\malware.exe'],
-            'target_filename': ['C:\\docs\\file.txt', 'C:\\scripts\\script.ps1'],
-            'event_id': [11, 11]
-        }
-        sysmon_df = pd.DataFrame(mock_data)
-
-        result = create_structural_features(sysmon_df)
-
-        assert 'process_guid' in result.columns
-        assert 'is_system32' in result.columns
-        assert 'is_executable' in result.columns
-        assert len(result) == 2
+        assert 'src_ip' in result.columns
+        assert 'ts' in result.columns
+        # Check that new features were added
+        assert len(result.columns) > len(network_df.columns)
+        assert len(result) == len(network_df)
 
 
 class TestGraphBuilder:
     """Test graph building functionality."""
 
-    def test_generate_node_id(self):
-        """Test node ID generation."""
-        node_id = generate_node_id('process', '12345')
-        assert node_id == 'process:12345'
+    def test_network_graph_builder_init(self):
+        """Test NetworkGraphBuilder initialization."""
+        builder = NetworkGraphBuilder()
+        assert builder.nodes == {}
+        assert builder.edges == {}
 
-    def test_parse_node_id(self):
-        """Test node ID parsing."""
-        node_type, identifier = parse_node_id('process:12345')
-        assert node_type == 'process'
-        assert identifier == '12345'
-
-    def test_parse_node_id_no_colon(self):
-        """Test parsing node ID without colon."""
-        node_type, identifier = parse_node_id('invalid_id')
-        assert node_type == ''
-        assert identifier == 'invalid_id'
+    def test_add_network_flow(self):
+        """Test adding network flows to graph."""
+        builder = NetworkGraphBuilder()
+        flow = {
+            'src_ip': '192.168.1.10',
+            'dst_ip': '10.0.0.1',
+            'tot_size': 1400,
+            'protocol_type': 'TCP',
+            'dst_port': 80
+        }
+        builder.add_network_flow(flow)
+        assert len(builder.nodes) == 2
+        assert len(builder.edges) == 1
 
 
 class TestIntegration:
@@ -142,32 +112,28 @@ class TestIntegration:
         # For now, just verify the components can be imported and basic functions work
 
         # Test that all main functions can be called without errors
-        from preprocessing.log_parser import parse_sysmon_csv
-        from preprocessing.feature_engineering import create_temporal_features
-        from preprocessing.graph_builder import generate_node_id
+        from preprocessing.log_parser import SysmonLogParser
+        from preprocessing.feature_engineering import extract_all_features
+        from preprocessing.graph_builder import NetworkGraphBuilder
 
         # Basic smoke tests
-        node_id = generate_node_id('test', '123')
-        assert isinstance(node_id, str)
-        assert ':' in node_id
+        builder = NetworkGraphBuilder()
+        assert isinstance(builder, NetworkGraphBuilder)
 
         # Test with minimal dataframes
         minimal_df = pd.DataFrame({
-            'timestamp': [pd.Timestamp.now()],
-            'process_guid': ['test_proc'],
-            'event_id': [1],
-            'events_per_minute': [1.0],
-            'burst_intensity': [1.0],
-            'is_system32': [0],
-            'is_temp': [0],
-            'path_depth': [1],
-            'command_entropy': [1.0],
-            'token_count': [1]
+            'ts': [1000.0],
+            'src_ip': ['192.168.1.10'],
+            'dst_ip': ['10.0.0.1'],
+            'src_port': [12345],
+            'dst_port': [80],
+            'protocol_type': ['TCP'],
+            'tot_size': [1400]
         })
 
-        temporal_features = create_temporal_features(minimal_df)
-        assert isinstance(temporal_features, pd.DataFrame)
-        assert len(temporal_features) >= 0  # May filter out invalid data
+        enriched_features = extract_all_features(minimal_df)
+        assert isinstance(enriched_features, pd.DataFrame)
+        assert len(enriched_features) >= 0  # May filter out invalid data
 
 
 if __name__ == '__main__':

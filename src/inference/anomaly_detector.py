@@ -52,14 +52,9 @@ try:
 except ImportError:
     ENSEMBLE_AVAILABLE = False
 
-# Feature names for compatibility
+# Feature names for compatibility - aligned with trained model
 TEMPORAL_FEATURE_NAMES = [
-    'src_port_entropy', 'dst_port_entropy', 'src_ip_entropy', 'dst_ip_entropy',
-    'packet_size_entropy', 'mean_inter_arrival', 'std_inter_arrival',
-    'cv_inter_arrival', 'burstiness', 'periodicity_score', 'peak_hour',
-    'off_hours_ratio', 'hour_entropy', 'connection_diversity', 'fan_out_ratio',
-    'rare_protocol_ratio', 'protocol_switching_rate', 'size_mean', 'size_std',
-    'size_skewness', 'size_kurtosis', 'small_packet_ratio', 'large_packet_ratio'
+    'unique_src_ips', 'unique_dst_ips', 'src_port_entropy', 'dst_port_entropy'
 ]
 
 NODE_FEATURE_NAMES = [
@@ -276,25 +271,38 @@ class EnhancedAnomalyDetector:
 
         # Convert tensors to Python types
         output = {
-            'anomaly_score': float(result['anomaly_score']),
-            'is_anomaly': bool(result['is_anomaly']),
+            'anomaly_score': float(result['anomaly_scores'][0]),  # Take first sample score
+            'is_anomaly': bool(result['is_anomaly'][0]),  # Take first sample result
             'confidence': float(result.get('confidence', 0.0))
         }
 
         if return_details:
-            output['attention_weights'] = result['attention_weights'].cpu().numpy().tolist()
-            output['feature_errors'] = {
-                name: float(error)
-                for name, error in zip(TEMPORAL_FEATURE_NAMES, result['feature_errors'].cpu().numpy())
-            }
-            output['top_anomalous_features'] = [
-                {'feature': name, 'error': float(error)}
-                for name, error in sorted(
-                    output['feature_errors'].items(),
-                    key=lambda x: x[1],
-                    reverse=True
-                )[:5]
-            ]
+            # Handle optional attention weights
+            if 'attention_weights' in result and result['attention_weights'] is not None:
+                output['attention_weights'] = result['attention_weights'].cpu().numpy().tolist()
+            else:
+                output['attention_weights'] = []
+
+            # Handle feature errors
+            if 'feature_errors' in result:
+                feature_errors_array = result['feature_errors']
+                if hasattr(feature_errors_array, 'cpu'):
+                    feature_errors_array = feature_errors_array.cpu().numpy()
+                output['feature_errors'] = {
+                    name: float(error)
+                    for name, error in zip(TEMPORAL_FEATURE_NAMES, feature_errors_array.flatten())
+                }
+                output['top_anomalous_features'] = [
+                    {'feature': name, 'error': float(error)}
+                    for name, error in sorted(
+                        output['feature_errors'].items(),
+                        key=lambda x: x[1],
+                        reverse=True
+                    )[:5]
+                ]
+            else:
+                output['feature_errors'] = {}
+                output['top_anomalous_features'] = []
 
         return output
 
