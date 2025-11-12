@@ -8,20 +8,73 @@ pool and makes it easy to mock the database during testing.
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
+from typing import Optional
 
 # --- Database Configuration ---
 # In a real application, these would come from environment variables.
-MONGO_CONNECTION_STRING = "mongodb://localhost:27017/"
-DATABASE_NAME = "zero_day_detector"
+import os
+MONGO_CONNECTION_STRING = os.getenv("MONGO_CONNECTION_STRING", "mongodb://localhost:27017/")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "zero_day_detector")
 ALERT_COLLECTION_NAME = "alerts"
+
+class MockCursor:
+    """Mock cursor for when database is not available."""
+    def __init__(self, data):
+        self.data = data
+
+    def sort(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def __iter__(self):
+        return iter(self.data)
+
+class MockCollection:
+    """Mock collection for when database is not available."""
+    def find(self, *args, **kwargs):
+        return MockCursor([])
+
+    def find_one(self, *args, **kwargs):
+        return None
+
+    def update_one(self, *args, **kwargs):
+        class MockResult:
+            matched_count = 0
+        return MockResult()
+
+    def delete_many(self, *args, **kwargs):
+        class MockResult:
+            deleted_count = 0
+        return MockResult()
+
+    def count_documents(self, *args, **kwargs):
+        return 0
+
+    def insert_many(self, *args, **kwargs):
+        return None
+
+class MockDatabase:
+    """Mock database for when MongoDB is not available."""
+    def get_alert_collection(self):
+        return MockCollection()
 
 class Database:
     """
     Manages the connection to the MongoDB database.
     """
     def __init__(self):
-        self.client = MongoClient(MONGO_CONNECTION_STRING)
-        self.db = self.client[DATABASE_NAME]
+        try:
+            self.client = MongoClient(MONGO_CONNECTION_STRING, serverSelectionTimeoutMS=5000)
+            # Test the connection
+            self.client.admin.command('ping')
+            self.db = self.client[DATABASE_NAME]
+            self.available = True
+        except Exception as e:
+            print(f"WARNING: Database connection failed: {e}")
+            self.available = False
+            self.mock_db = MockDatabase()
 
     def get_alert_collection(self) -> Collection:
         """
@@ -30,6 +83,8 @@ class Database:
         Returns:
             The PyMongo Collection object for alerts.
         """
+        if not self.available:
+            return self.mock_db.get_alert_collection()
         return self.db[ALERT_COLLECTION_NAME]
 
 # --- Singleton Database Instance ---

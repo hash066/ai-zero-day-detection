@@ -13,7 +13,7 @@ class Alert(BaseModel):
     """
     Represents a security alert record.
     """
-    id: str = Field(..., alias="_id", description="Unique identifier for the alert")
+    id: str = Field(default_factory=lambda: __import__('uuid').uuid4().hex, alias="_id", description="Unique identifier for the alert")
     entity_id: str = Field(..., description="The entity that triggered the alert (e.g., IP address, process GUID)")
     threat_score: float = Field(..., ge=0.0, le=1.0, description="The threat score [0, 1] that triggered the alert")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of when the alert was generated")

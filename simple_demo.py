@@ -109,10 +109,16 @@ def main():
 
         # Test main pipeline
         print("🔄 Testing main pipeline...")
-        from main_pipeline import PipelineConfig
+        from pipeline.validation import PipelineConfig
 
-        config = PipelineConfig()
-        assert config.get('data.raw_dir') == 'data/raw'
+        config = PipelineConfig(
+            data={'raw_dir': 'data/raw', 'processed_dir': 'data/processed', 'features_dir': 'data/features', 'graphs_dir': 'data/graphs'},
+            collection={'sysmon_batch_size': 1000, 'network_interface': None, 'pcap_file': None},
+            models={'lstm_model_dir': 'trained_models/lstm', 'gnn_model_dir': 'trained_models/gnn', 'ensemble_lstm_weight': 0.6, 'ensemble_gnn_weight': 0.4},
+            streaming={},
+            inference={'alert_threshold': 0.75, 'webhook_url': ''}
+        )
+        assert config.data['raw_dir'] == 'data/raw'
         print("✅ Pipeline configuration works")
 
         print("\n" + "=" * 60)

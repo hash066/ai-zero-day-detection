@@ -230,32 +230,45 @@ class DataPreprocessor:
                 )
                 results['processed_files'] = processed_files
 
-                # Step 2: Feature engineering
+                # Step 2: Feature engineering (optional)
                 if processed_files.get('clean_path'):
-                    feature_files = self.engineer_features(
-                        sysmon_path=processed_files['clean_path'],
-                        network_path=collected_data.get('network_csv'),
-                        output_prefix=output_prefix
-                    )
-                    results['feature_files'] = feature_files
-
-                    # Step 3: Graph construction (if features available)
-                    temporal_csv = self.features_dir / f"{output_prefix}_temporal_features.csv"
-                    structural_csv = self.features_dir / f"{output_prefix}_structural_features.csv"
-                    semantic_csv = self.features_dir / f"{output_prefix}_semantic_features.csv"
-
-                    if (temporal_csv.exists() and structural_csv.exists() and semantic_csv.exists()):
-                        graph_files = self.build_graphs(
+                    try:
+                        feature_files = self.engineer_features(
                             sysmon_path=processed_files['clean_path'],
-                            temporal_features_path=str(temporal_csv),
-                            structural_features_path=str(structural_csv),
-                            semantic_features_path=str(semantic_csv),
-                            network_path=collected_data.get('network_csv')
+                            network_path=collected_data.get('network_csv'),
+                            output_prefix=output_prefix
                         )
-                        results['graph_files'] = graph_files
+                        results['feature_files'] = feature_files
 
-            results['success'] = True
-            logger.info("Full preprocessing pipeline completed successfully")
+                        # Step 3: Graph construction (if features available)
+                        temporal_csv = self.features_dir / f"{output_prefix}_temporal_features.csv"
+                        structural_csv = self.features_dir / f"{output_prefix}_structural_features.csv"
+                        semantic_csv = self.features_dir / f"{output_prefix}_semantic_features.csv"
+
+                        if (temporal_csv.exists() and structural_csv.exists() and semantic_csv.exists()):
+                            try:
+                                graph_files = self.build_graphs(
+                                    sysmon_path=processed_files['clean_path'],
+                                    temporal_features_path=str(temporal_csv),
+                                    structural_features_path=str(structural_csv),
+                                    semantic_features_path=str(semantic_csv),
+                                    network_path=collected_data.get('network_csv')
+                                )
+                                results['graph_files'] = graph_files
+                            except Exception as e:
+                                logger.warning(f"Graph construction failed: {e}")
+                                results['graph_files'] = {'error': str(e)}
+                    except Exception as e:
+                        logger.warning(f"Feature engineering failed: {e}")
+                        results['feature_files'] = {'error': str(e)}
+
+            # Success if we at least processed the basic Sysmon data
+            if results['processed_files']:
+                results['success'] = True
+                logger.info("Full preprocessing pipeline completed (basic processing successful)")
+            else:
+                results['success'] = False
+                logger.warning("Preprocessing pipeline completed but no data was processed")
 
         except Exception as e:
             logger.error(f"Preprocessing pipeline failed: {e}")

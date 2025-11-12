@@ -12,6 +12,7 @@ import pandas as pd
 import time
 import psutil
 import torch
+import os
 
 from .data_collector import DataCollector
 from .preprocessor import DataPreprocessor
@@ -19,6 +20,36 @@ from .model_manager import ModelManager
 from .streaming_engine import StreamingEngine
 
 logger = logging.getLogger(__name__)
+
+
+class PipelineError(Exception):
+    """Base exception for pipeline errors."""
+    pass
+
+
+class ConfigurationError(PipelineError):
+    """Raised when pipeline configuration is invalid."""
+    pass
+
+
+class DataCollectionError(PipelineError):
+    """Raised when data collection fails."""
+    pass
+
+
+class PreprocessingError(PipelineError):
+    """Raised when data preprocessing fails."""
+    pass
+
+
+class ModelError(PipelineError):
+    """Raised when ML model operations fail."""
+    pass
+
+
+class ValidationError(PipelineError):
+    """Raised when input validation fails."""
+    pass
 
 
 class PipelineOrchestrator:
@@ -39,37 +70,120 @@ class PipelineOrchestrator:
 
         Args:
             config: Pipeline configuration dictionary
+
+        Raises:
+            ConfigurationError: If configuration is invalid
         """
-        self.config = config or self._get_default_config()
+        try:
+            self.config = config or self._get_default_config()
+            self._validate_config(self.config)
 
-        # Initialize components
-        self.data_collector = DataCollector(
-            batch_size=self.config.get('collection', {}).get('batch_size', 1000)
-        )
+            # Create necessary directories
+            self._ensure_directories()
 
-        self.preprocessor = DataPreprocessor(
-            raw_dir=self.config.get('data', {}).get('raw_dir', 'data/raw'),
-            processed_dir=self.config.get('data', {}).get('processed_dir', 'data/processed'),
-            features_dir=self.config.get('data', {}).get('features_dir', 'data/features'),
-            graphs_dir=self.config.get('data', {}).get('graphs_dir', 'data/graphs')
-        )
+            # Initialize components with error handling
+            self.data_collector = DataCollector(
+                batch_size=self.config.get('collection', {}).get('batch_size', 1000)
+            )
 
-        self.model_manager = ModelManager(
-            lstm_model_path=self.config.get('models', {}).get('lstm_path', 'trained_models/lstm'),
-            gnn_model_path=self.config.get('models', {}).get('gnn_path', 'trained_models/gnn'),
-            ensemble_config=self.config.get('models', {}).get('ensemble', {})
-        )
+            self.preprocessor = DataPreprocessor(
+                raw_dir=self.config.get('data', {}).get('raw_dir', 'data/raw'),
+                processed_dir=self.config.get('data', {}).get('processed_dir', 'data/processed'),
+                features_dir=self.config.get('data', {}).get('features_dir', 'data/features'),
+                graphs_dir=self.config.get('data', {}).get('graphs_dir', 'data/graphs')
+            )
 
-        self.streaming_engine = StreamingEngine(
-            kafka_topic=self.config.get('streaming', {}).get('kafka_topic', 'sysmon-topic'),
-            kafka_servers=self.config.get('streaming', {}).get('kafka_servers', 'localhost:9092'),
-            buffer_size=self.config.get('streaming', {}).get('buffer_size', 50)
-        )
+            self.model_manager = ModelManager(
+                lstm_model_path=self.config.get('models', {}).get('lstm_path', 'trained_models/lstm'),
+                gnn_model_path=self.config.get('models', {}).get('gnn_path', 'trained_models/gnn'),
+                ensemble_config=self.config.get('models', {}).get('ensemble', {})
+            )
 
-        # Pipeline state
-        self.models_initialized = False
+            self.streaming_engine = StreamingEngine(
+                kafka_topic=self.config.get('streaming', {}).get('kafka_topic', 'sysmon-topic'),
+                kafka_servers=self.config.get('streaming', {}).get('kafka_servers', 'localhost:9092'),
+                buffer_size=self.config.get('streaming', {}).get('buffer_size', 50)
+            )
 
-        logger.info("Pipeline orchestrator initialized")
+            # Pipeline state
+            self.models_initialized = False
+
+            logger.info("Pipeline orchestrator initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize pipeline orchestrator: {e}")
+            raise ConfigurationError(f"Pipeline initialization failed: {e}") from e
+
+    def _validate_config(self, config: Dict[str, Any]):
+        """
+        Validate pipeline configuration.
+
+        Args:
+            config: Configuration dictionary to validate
+
+        Raises:
+            ConfigurationError: If configuration is invalid
+        """
+        if not isinstance(config, dict):
+            raise ConfigurationError("Configuration must be a dictionary")
+
+        # Validate required sections
+        required_sections = ['data', 'collection', 'models', 'streaming', 'inference']
+        for section in required_sections:
+            if section not in config:
+                raise ConfigurationError(f"Missing required configuration section: {section}")
+
+        # Validate data directories
+        data_config = config.get('data', {})
+        required_dirs = ['raw_dir', 'processed_dir', 'features_dir', 'graphs_dir']
+        for dir_key in required_dirs:
+            if dir_key not in data_config:
+                raise ConfigurationError(f"Missing required data directory: {dir_key}")
+
+        # Validate batch size
+        batch_size = config.get('collection', {}).get('batch_size', 1000)
+        if not isinstance(batch_size, int) or batch_size <= 0:
+            raise ConfigurationError("Batch size must be a positive integer")
+
+        # Validate model weights
+        ensemble_config = config.get('models', {}).get('ensemble', {})
+        lstm_weight = ensemble_config.get('lstm_weight', 0.6)
+        gnn_weight = ensemble_config.get('gnn_weight', 0.4)
+
+        if not (0 <= lstm_weight <= 1) or not (0 <= gnn_weight <= 1):
+            raise ConfigurationError("Model weights must be between 0 and 1")
+
+        if abs(lstm_weight + gnn_weight - 1.0) > 0.01:
+            raise ConfigurationError("Model weights must sum to 1.0")
+
+        logger.info("Configuration validation passed")
+
+    def _ensure_directories(self):
+        """
+        Ensure all required directories exist.
+
+        Raises:
+            ConfigurationError: If directories cannot be created
+        """
+        directories = [
+            self.config['data']['raw_dir'],
+            self.config['data']['processed_dir'],
+            self.config['data']['features_dir'],
+            self.config['data']['graphs_dir'],
+            self.config['models']['lstm_path'],
+            self.config['models']['gnn_path'],
+            'data/incidents',  # For incident logging
+            'logs'  # For logging
+        ]
+
+        for dir_path in directories:
+            try:
+                Path(dir_path).mkdir(parents=True, exist_ok=True)
+                logger.debug(f"Ensured directory exists: {dir_path}")
+            except Exception as e:
+                raise ConfigurationError(f"Failed to create directory {dir_path}: {e}")
+
+        logger.info("All required directories created")
 
     def _get_default_config(self) -> Dict[str, Any]:
         """
@@ -202,7 +316,16 @@ class PipelineOrchestrator:
 
         Returns:
             Complete pipeline results
+
+        Raises:
+            ValidationError: If input parameters are invalid
+            DataCollectionError: If data collection fails
+            PreprocessingError: If preprocessing fails
+            ModelError: If model inference fails
         """
+        # Validate inputs
+        self._validate_pipeline_inputs(source, entity_id, entity_type)
+
         logger.info(f"Running batch pipeline for {entity_type}:{entity_id}")
 
         results = {
@@ -217,32 +340,51 @@ class PipelineOrchestrator:
 
         try:
             # Step 1: Collect data
-            collected_data = self.data_collector.collect_batch(source=source)
-            results['collection'] = {
-                'events_collected': len(collected_data.get('sysmon_events', [])),
-                'source': source
-            }
+            logger.info("Step 1: Collecting data...")
+            try:
+                collected_data = self.data_collector.collect_batch(source=source)
+                results['collection'] = {
+                    'events_collected': len(collected_data.get('sysmon_events', [])),
+                    'source': source
+                }
 
-            if not collected_data.get('sysmon_events'):
-                logger.warning("No data collected, skipping pipeline")
-                return results
+                if not collected_data.get('sysmon_events'):
+                    logger.warning("No data collected, skipping pipeline")
+                    return results
+
+            except Exception as e:
+                logger.error(f"Data collection failed: {e}")
+                raise DataCollectionError(f"Failed to collect data from source '{source}': {e}") from e
 
             # Step 2: Preprocess data
-            preprocessing_results = self.preprocessor.run_full_preprocessing(collected_data)
-            results['preprocessing'] = preprocessing_results
+            logger.info("Step 2: Preprocessing data...")
+            try:
+                preprocessing_results = self.preprocessor.run_full_preprocessing(collected_data)
+                results['preprocessing'] = preprocessing_results
 
-            if not preprocessing_results.get('success', False):
-                logger.error("Preprocessing failed")
-                return results
+                if not preprocessing_results.get('success', False):
+                    error_msg = preprocessing_results.get('error', 'Unknown preprocessing error')
+                    logger.error(f"Preprocessing failed: {error_msg}")
+                    raise PreprocessingError(f"Preprocessing failed: {error_msg}")
+
+            except PreprocessingError:
+                raise
+            except Exception as e:
+                logger.error(f"Preprocessing error: {e}")
+                raise PreprocessingError(f"Unexpected preprocessing error: {e}") from e
 
             # Step 3: Run detection (if models available)
             if self.models_initialized and preprocessing_results.get('feature_files'):
-                # Load processed data for inference
+                logger.info("Step 3: Running anomaly detection...")
                 try:
-                    # Load temporal features
+                    # Load processed data for inference
                     temporal_csv = preprocessing_results['feature_files'].get('temporal_features')
                     if temporal_csv and Path(temporal_csv).exists():
                         temporal_df = pd.read_csv(temporal_csv)
+
+                        # Validate DataFrame
+                        if temporal_df.empty:
+                            raise ModelError("Temporal features DataFrame is empty")
 
                         # Create mock network data (would be from preprocessing)
                         network_df = pd.DataFrame({
@@ -267,21 +409,27 @@ class PipelineOrchestrator:
                         )
 
                         results['detection'] = detection_result
+                        logger.info("Detection completed successfully")
                     else:
                         logger.warning("No temporal features available for detection")
 
+                except ModelError:
+                    raise
                 except Exception as e:
                     logger.error(f"Detection failed: {e}")
-                    results['detection'] = {'error': str(e)}
+                    raise ModelError(f"Model inference failed: {e}") from e
             else:
-                logger.info("Models not initialized or no features available")
+                logger.info("Models not initialized or no features available - skipping detection")
 
             results['success'] = True
             logger.info("Batch pipeline completed successfully")
 
+        except (DataCollectionError, PreprocessingError, ModelError):
+            # Re-raise specific pipeline errors
+            raise
         except Exception as e:
-            logger.error(f"Batch pipeline failed: {e}")
-            results['error'] = str(e)
+            logger.error(f"Unexpected batch pipeline error: {e}")
+            raise PipelineError(f"Batch pipeline failed with unexpected error: {e}") from e
 
         return results
 
@@ -532,6 +680,39 @@ class PipelineOrchestrator:
         }
 
         return stats
+
+    def _validate_pipeline_inputs(self, source: str, entity_id: str, entity_type: str):
+        """
+        Validate inputs for pipeline execution.
+
+        Args:
+            source: Data source identifier
+            entity_id: Entity identifier
+            entity_type: Entity type
+
+        Raises:
+            ValidationError: If inputs are invalid
+        """
+        # Validate source
+        valid_sources = ['sysmon', 'network', 'file', 'stream']
+        if source not in valid_sources:
+            raise ValidationError(f"Invalid source '{source}'. Must be one of: {valid_sources}")
+
+        # Validate entity_id
+        if not isinstance(entity_id, str) or not entity_id.strip():
+            raise ValidationError("Entity ID must be a non-empty string")
+
+        if len(entity_id) > 100:
+            raise ValidationError("Entity ID must be 100 characters or less")
+
+        # Validate entity_type
+        valid_entity_types = ['system', 'user', 'host', 'network', 'application']
+        if entity_type not in valid_entity_types:
+            raise ValidationError(f"Invalid entity type '{entity_type}'. Must be one of: {valid_entity_types}")
+
+        # Sanitize inputs
+        entity_id = entity_id.strip()
+        entity_type = entity_type.strip().lower()
 
     def cleanup(self):
         """
