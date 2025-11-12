@@ -1,6 +1,6 @@
-# Aegis Zero Dashboard
+# Aegis Zero Dashboard# React + TypeScript + Vite
 
-A professional, minimalistic React + Vite dashboard for the AI-Based Zero-Day Attack Detection System.
+A professional, minimalistic React + Vite dashboard for the AI-Based Zero-Day Attack Detection System.This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 ## Features
 
